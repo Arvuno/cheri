@@ -47,13 +47,18 @@
 
 ## Commit
 
-**NOT YET CREATED** — push report written before staging commit.
+**Hash:** `b8c2ee6`
+**Message:** `chore(release): prepare Cheri v0.8 public beta`
+**Files changed:** `.gitignore` (+7 lines), `reports/github_push/README_AND_PUSH_REPORT.md` (new, +62 lines)
 
 ---
 
 ## Push Result
 
-**NOT YET ATTEMPTED**
+**✅ PUSHED SUCCESSFULLY**
+- `473a267..b8c2ee6  main -> main`
+- Remote: `https://github.com/Arvuno/cheri.git`
+- Branch tracking set: `origin/main`
 
 ---
 
