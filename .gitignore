@@ -41,6 +41,13 @@ task-watchers/
 .env
 .env.local
 .env.*.local
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+.npmrc
+.pypirc
+.netrc
 .dev.vars
 .dev.vars.*
 
