@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import requests
 import shutil
 import tarfile
 import zipfile
@@ -379,6 +381,8 @@ def show_handoff(console: Console, client: CheriClient, store: JsonCredentialSto
 
 def pull_handoff(console: Console, client: CheriClient, store: JsonCredentialStore, handoff_id: str, dest: Optional[str]) -> None:
     """Download handoff files to a local folder."""
+    state = load_authenticated_state(client, store)
+
     try:
         h = get_handoff_service(client, store, handoff_id)
     except CheriClientError as exc:
@@ -394,14 +398,113 @@ def pull_handoff(console: Console, client: CheriClient, store: JsonCredentialSto
     output_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"[cyan]Pulling handoff to[/] {output_dir}...")
 
-    # Write manifest
+    # Get manifest from backend
     manifest_data = h.get("manifest", {})
+    manifest_file_id = h.get("manifest_file_id")
+
+    # If manifest_file_id is available, download the actual manifest file
+    # Otherwise fall back to manifest from backend metadata
+    if manifest_file_id:
+        try:
+            # Get file metadata to find download grant
+            file_meta = client.get_file(state, manifest_file_id, workspace_id=h.get("workspace_id"))
+            grant = client.request_download_grant(state, manifest_file_id, workspace_id=h.get("workspace_id"))
+
+            # Download manifest content
+            resp = requests.get(grant.download_url, timeout=60)
+            resp.raise_for_status()
+            manifest_data = resp.json()
+
+            console.print(f"[green]Downloaded manifest from storage[/]")
+        except Exception as exc:
+            console.print(f"[yellow]Warning:[/] Could not download manifest file, using backend metadata: {exc}")
+            if not manifest_data:
+                console.print("[red]Error:[/] No manifest available. Run 'cheri handoff show' to check status.")
+                return
+    elif not manifest_data:
+        console.print("[red]Error:[/] No manifest available. Handoff may not have been pushed successfully.")
+        return
+
+    # Write manifest to destination
     manifest_path = output_dir / "cheri-handoff.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2)
 
-    console.print(f"[green]Downloaded handoff manifest[/]")
-    console.print(f"[dim]Note:[/] File content download requires storage provider integration.")
+    # Download files
+    files = manifest_data.get("files", [])
+    workspace_id = h.get("workspace_id")
+
+    downloaded = []
+    failed = []
+    checksum_mismatches = []
+    skipped = []
+
+    console.print(f"[cyan]Downloading {len(files)} file(s)...[/]")
+
+    for file_entry in files:
+        rel_path = file_entry.get("relative_path", "")
+        file_id = file_entry.get("file_id")
+        expected_checksum = file_entry.get("checksum", "")
+
+        # Skip files without file_id (not uploaded)
+        if not file_id:
+            skipped.append(rel_path)
+            console.print(f"  [dim]-[dim] {rel_path} (no file_id - not uploaded)")
+            continue
+
+        try:
+            # Request download grant
+            grant = client.request_download_grant(state, file_id, workspace_id=workspace_id)
+
+            # Download content
+            resp = requests.get(grant.download_url, timeout=300)
+            resp.raise_for_status()
+            content = resp.content
+
+            # Verify checksum if available
+            if expected_checksum:
+                actual_checksum = hashlib.sha256(content).hexdigest()
+                if actual_checksum != expected_checksum:
+                    checksum_mismatches.append({
+                        "path": rel_path,
+                        "expected": expected_checksum,
+                        "actual": actual_checksum,
+                    })
+                    console.print(f"  [red]![/] {rel_path}: checksum mismatch!")
+                    failed.append(rel_path)
+                    continue
+
+            # Write to destination
+            dest_path = output_dir / rel_path
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            dest_path.write_bytes(content)
+            downloaded.append(rel_path)
+            console.print(f"  [green]+[/] {rel_path}")
+        except Exception as exc:
+            failed.append(rel_path)
+            console.print(f"  [red]![/] {rel_path}: {exc}")
+
+    # Summary
+    console.print(Panel.fit(
+        f"Handoff ID   : {handoff_id}\n"
+        f"Downloaded   : {len(downloaded)} file(s)\n"
+        f"Failed       : {len(failed)} file(s)\n"
+        f"Checksum mismatches: {len(checksum_mismatches)}\n"
+        f"Skipped (no file_id): {len(skipped)}\n"
+        f"Destination  : {output_dir}",
+        title="Pull Complete",
+        border_style="green" if not failed and not checksum_mismatches else "yellow",
+    ))
+
+    if checksum_mismatches:
+        console.print("\n[red]Checksum mismatches:[/]")
+        for cm in checksum_mismatches:
+            console.print(f"  {cm['path']}: expected {cm['expected'][:12]}..., got {cm['actual'][:12]}...")
+
+    if failed:
+        console.print("\n[red]Failed files:[/]")
+        for path in failed:
+            console.print(f"  {path}")
 
 
 def latest_handoff(console: Console, client: CheriClient, store: JsonCredentialStore, workspace: Optional[str]) -> None:

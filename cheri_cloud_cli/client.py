@@ -157,6 +157,10 @@ class CheriClient:
         )
         return RemoteFile.from_payload(payload.get("file", {}))
 
+    def get_file(self, state: AuthState, file_id: str, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get file metadata by ID."""
+        return self._request("get", f"/v1/files/{file_id}", state=state, workspace_id=workspace_id)
+
     def request_download_grant(self, state: AuthState, file_id: str, workspace_id: Optional[str] = None) -> DownloadGrant:
         payload = self._request(
             "get",
