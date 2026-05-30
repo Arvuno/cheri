@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
 from ..config import get_legacy_config_dir, get_paths
 from ..contracts import AuthState
+
+_KEYRING_SERVICE_NAME = "cheri"
 
 
 class CredentialStore(ABC):
@@ -137,3 +141,188 @@ class JsonCredentialStore(CredentialStore):
         for path in (self.location, self.secret_location, self.legacy_location):
             if path.exists():
                 path.unlink()
+
+
+def _get_keyring() -> Optional[object]:
+    try:
+        import keyring
+
+        return keyring
+    except Exception:
+        return None
+
+
+def _is_headless() -> bool:
+    if sys.platform == "win32" or sys.platform == "darwin":
+        return False
+    if os.environ.get("DISPLAY"):
+        return False
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return False
+    if os.environ.get("CHERI_FORCE_KEYRING"):
+        return False
+    return True
+
+
+class KeyringCredentialStore(CredentialStore):
+    """Secure credential store using OS keyring when available.
+
+    Falls back to protected JSON file storage in headless environments
+    (containers, servers, WSL without desktop) where keyring is unavailable.
+
+    Migration: on first load with keyring available, reads existing plaintext
+    credentials.json and stores secrets in the OS keychain, then sanitizes
+    the plaintext file.
+    """
+
+    _SESSION_KEY = "cheri.session_token"
+    _BOOTSTRAP_KEY = "cheri.bootstrap_secret"
+
+    def __init__(self) -> None:
+        self.paths = get_paths()
+        self._keyring = _get_keyring()
+        self._use_keyring = self._keyring is not None and not _is_headless()
+        self._fallback_warned = False
+
+    @property
+    def keyring_available(self) -> bool:
+        return self._use_keyring
+
+    def _public_payload(self, state: AuthState) -> dict:
+        return {
+            "format_version": 2,
+            "identity": state.identity.to_dict(),
+            "workspace_access": state.workspace_access.to_dict(),
+        }
+
+    def _warn_fallback(self) -> None:
+        if self._fallback_warned:
+            return
+        self._fallback_warned = True
+        warnings.warn(
+            "OS keyring is not available. Credentials are stored in a protected local file "
+            "that may not be encrypted. Do not use this in untrusted multi-user environments.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    def _migrate_from_json_if_needed(self) -> Optional[AuthState]:
+        """One-time migration: read plaintext credentials, store to keyring, create new state file."""
+        legacy_cred_path = get_legacy_config_dir() / "credentials.json"
+        if not legacy_cred_path.exists():
+            return None
+        try:
+            payload = _read_json(legacy_cred_path)
+            session_token = payload.get("session_token", "") or payload.get("session", {}).get("token", "")
+            bootstrap_secret = (
+                payload.get("bootstrap_secret", "") or payload.get("bootstrap", {}).get("secret", "")
+            )
+            if not session_token and not bootstrap_secret:
+                return None
+            identity = payload.get("identity", {})
+            workspace_access = payload.get("workspace_access", {})
+            if self._use_keyring:
+                if session_token:
+                    self._keyring.set_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY, session_token)
+                if bootstrap_secret:
+                    self._keyring.set_password(_KEYRING_SERVICE_NAME, self._BOOTSTRAP_KEY, bootstrap_secret)
+            else:
+                secret_payload = {
+                    "format_version": 2,
+                    "session": {"token": session_token},
+                    "bootstrap": {"secret": bootstrap_secret},
+                }
+                _write_json(self.paths.secret_file, secret_payload, private=True)
+            new_state_payload = {
+                "format_version": 2,
+                "identity": identity,
+                "workspace_access": workspace_access,
+            }
+            _write_json(self.paths.state_file, new_state_payload, private=False)
+            sanitized = {
+                "format_version": 2,
+                "migrated_at": "2026-05-30T00:00:00+00:00",
+                "note": "secrets moved to OS keyring or protected file",
+            }
+            _write_json(legacy_cred_path, sanitized, private=True)
+            return None
+        except Exception:
+            return None
+
+    def load(self) -> Optional[AuthState]:
+        self._migrate_from_json_if_needed()
+        public_path = self.paths.state_file
+        if not public_path.exists():
+            return None
+        try:
+            public_payload = _read_json(public_path)
+        except Exception:
+            return None
+        session_token = ""
+        bootstrap_secret = ""
+        if self._use_keyring:
+            try:
+                session_token = str(self._keyring.get_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY) or "")
+            except Exception:
+                pass
+            try:
+                bootstrap_secret = str(self._keyring.get_password(_KEYRING_SERVICE_NAME, self._BOOTSTRAP_KEY) or "")
+            except Exception:
+                pass
+        else:
+            self._warn_fallback()
+            secret_payload = _read_json(self.paths.secret_file)
+            session_token = secret_payload.get("session", {}).get("token", "")
+            bootstrap_secret = secret_payload.get("bootstrap", {}).get("secret", "")
+        from ..contracts import AuthState as AS
+
+        combined = {**public_payload, "session_token": session_token, "bootstrap_secret": bootstrap_secret}
+        return AS.from_local_payload(combined)
+
+    def save(self, state: AuthState, *, persist_bootstrap_secret: bool | None = None) -> None:
+        existing = self.load()
+        should_persist = (
+            bool(existing.bootstrap_secret if persist_bootstrap_secret is None else persist_bootstrap_secret)
+        )
+        _write_json(self.paths.state_file, self._public_payload(state), private=False)
+        if self._use_keyring:
+            try:
+                self._keyring.set_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY, state.session_token)
+            except Exception:
+                pass
+            try:
+                if should_persist:
+                    self._keyring.set_password(_KEYRING_SERVICE_NAME, self._BOOTSTRAP_KEY, state.bootstrap_secret)
+                else:
+                    try:
+                        self._keyring.delete_password(_KEYRING_SERVICE_NAME, self._BOOTSTRAP_KEY)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        else:
+            self._warn_fallback()
+            secret_payload = {
+                "format_version": 2,
+                "session": state.session.to_dict(),
+                "bootstrap": {"secret": state.bootstrap.secret if should_persist else ""},
+            }
+            _write_json(self.paths.secret_file, secret_payload, private=True)
+
+    def clear(self) -> None:
+        if self._use_keyring:
+            try:
+                self._keyring.delete_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY)
+            except Exception:
+                pass
+            try:
+                self._keyring.delete_password(_KEYRING_SERVICE_NAME, self._BOOTSTRAP_KEY)
+            except Exception:
+                pass
+        for path in (self.paths.state_file, self.paths.secret_file, get_legacy_config_dir() / "state.json"):
+            if path.exists():
+                path.unlink()
+
+
+# Alias for backwards compatibility
+SecureCredentialStore = KeyringCredentialStore

@@ -6,7 +6,6 @@ import hashlib
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -313,6 +312,7 @@ def scan_directory(
     return files, skipped
 
 
+# ruff: noqa: E402  # CIRCULAR IMPORT: service imports domain types
 from .service import (
     create_manifest,
     write_manifest,
@@ -338,5 +338,8 @@ __all__ = [
     "list_handoffs",
     "get_handoff",
     "get_latest_handoff",
+    "list_handoffs_service",
+    "get_handoff_service",
+    "get_latest_handoff_service",
     "create_handoff_metadata",
 ]

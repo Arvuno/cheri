@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
 
@@ -29,6 +29,22 @@ DEFAULT_EXCLUDE_PATTERNS = [
     "*~",
     ".DS_Store",
     "Thumbs.db",
+    ".env",
+    ".env.*",
+    "*.env",
+    ".env/**",
+    "credentials.json",
+    "*.key",
+    "*.pem",
+    "id_rsa",
+    "id_rsa*",
+    "id_ed25519",
+    "id_ed25519*",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "secrets.json",
+    "secret.json",
 ]
 
 
@@ -40,6 +56,7 @@ class TaskScanResult:
     path_map: Dict[str, Path]
     changed_paths: List[str]
     deleted_paths: List[str]
+    skipped_sensitive: List[str] = field(default_factory=list)
 
 
 def normalize_target_path(raw_path: str, target_type: str) -> Path:
@@ -127,7 +144,15 @@ def prime_runtime_state(task: TaskDefinition, runtime: TaskRuntimeState) -> Task
 
 def scan_task(task: TaskDefinition, runtime: TaskRuntimeState, *, force: bool = False) -> TaskScanResult:
     root_path = normalize_target_path(task.target_path, task.target_type)
-    path_map = collect_task_paths(task)
+    all_files = _collect_all_files(root_path, task)
+    skipped_sensitive: List[str] = []
+    allowed_paths: Dict[str, Path] = {}
+    for relative_path, path in all_files.items():
+        if _path_allowed(relative_path, task):
+            allowed_paths[relative_path] = path
+        else:
+            skipped_sensitive.append(relative_path)
+    path_map = allowed_paths
     current_snapshot = {
         relative_path: _snapshot_entry(path)
         for relative_path, path in path_map.items()
@@ -149,4 +174,19 @@ def scan_task(task: TaskDefinition, runtime: TaskRuntimeState, *, force: bool = 
         path_map=path_map,
         changed_paths=changed_paths,
         deleted_paths=deleted_paths,
+        skipped_sensitive=skipped_sensitive,
     )
+
+
+def _collect_all_files(root_path: Path, task: TaskDefinition) -> Dict[str, Path]:
+    """Collect all files including those that may be excluded (for tracking skipped)."""
+    path_map: Dict[str, Path] = {}
+    iterator = root_path.rglob("*") if task.recursive else root_path.glob("*")
+    for candidate in iterator:
+        if candidate.is_symlink():
+            continue
+        if not candidate.is_file():
+            continue
+        relative_path = candidate.relative_to(root_path).as_posix()
+        path_map[relative_path] = candidate
+    return path_map

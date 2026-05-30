@@ -15,23 +15,43 @@ from .cli_framework import CheriCommand, CheriGroup
 from .client import CheriClient, CheriClientError
 from .config import CheriConfigError
 from .configuration import check_backend, reset_config, set_api_url, show_config
+from .doctor import doctor
 from .files import download_file, list_files, upload_file
+from .handoff.cli import (
+    inspect_handoff as handoff_inspect,
+    create_handoff as handoff_create,
+    push_handoff as handoff_push,
+    list_handoffs as handoff_list,
+    show_handoff as handoff_show,
+    pull_handoff as handoff_pull,
+    latest_handoff as handoff_latest,
+    bundle_handoff as handoff_bundle,
+    archive_handoff as handoff_archive,
+    delete_handoff as handoff_delete,
+    diff_handoffs as handoff_diff,
+    show_logs,
+)
+from .init import init
 from .sessions import JsonCredentialStore
+from .storage import check_storage_connectivity, list_storage_providers, show_storage_status, configure_storage_provider, storage_migrate_plan, storage_migrate_dry_run
 from .task import (
     create_task,
+    create_task_interactive,
+    dry_run_task,
     find_task_targets,
     list_tasks as list_task_definitions,
     pause_task,
     remove_task,
     resume_task,
     run_task,
+    scan_task,
     show_task_logs,
     start_task,
     stop_task,
     watch_tasks,
 )
 from .teams import create_invite, list_team, reset_invites
-from .workspace import create_workspace, join_workspace, list_workspaces, manage_workspace, use_workspace
+from .workspace import create_workspace, join_workspace, list_workspaces, manage_workspace, use_workspace, workspace_status
 
 
 console = Console()
@@ -133,12 +153,14 @@ def _resolve_help_context(root_command: click.Command, command_path: tuple[str, 
 @click.group(
     cls=CheriGroup,
     help="Cheri - collaborative workspace sync from the command line.",
-    command_order=["register", "login", "logout", "config", "workspace", "file", "teams", "activity", "task", "help"],
+    command_order=["init", "register", "login", "logout", "doctor", "config", "workspace", "file", "teams", "activity", "task", "help"],
     commands_heading="Core commands",
     help_hint='Use "cheri <command> --help" for more details.',
     examples=[
+        "cheri init",
         "cheri register",
         "cheri login",
+        "cheri doctor",
         "cheri config get",
         "cheri file upload ./notes.md",
         "cheri task list",
@@ -154,6 +176,7 @@ def _resolve_help_context(root_command: click.Command, command_path: tuple[str, 
         "teamss": "teams list",
         "workspaces": "workspace list",
         "tasks": "task list",
+        "diagnose": "doctor",
     },
 )
 def cli() -> None:
@@ -201,6 +224,69 @@ def login_cmd(invite_code: str, force: bool) -> None:
 )
 def logout_cmd() -> None:
     logout(console, make_client(), make_store())
+
+
+@cli.command(
+    "init",
+    cls=CheriCommand,
+    help="Cheri init - initialize Cheri and walk through first-time setup.",
+    short_help="Initialize Cheri and set up your workspace",
+    examples=[
+        "cheri init",
+        "cheri init --non-interactive",
+        "cheri init --workspace myteam",
+        "cheri init --skip-upload --skip-task",
+    ],
+)
+@click.option("--non-interactive", is_flag=True, help="Run without interactive prompts.")
+@click.option("--skip-upload", is_flag=True, help="Skip the upload offer.")
+@click.option("--skip-task", is_flag=True, help="Skip the task creation offer.")
+@click.option("--workspace", "workspace_name", default=None, help="Workspace name to create or use.")
+@click.option("--api-url", default=None, help="Backend API URL to use.")
+@click.option("--register", is_flag=True, help="Force registration flow.")
+def init_cmd(
+    non_interactive: bool,
+    skip_upload: bool,
+    skip_task: bool,
+    workspace_name: Optional[str],
+    api_url: Optional[str],
+    register: bool,
+) -> None:
+    init(
+        console,
+        make_client(),
+        make_store(),
+        non_interactive=non_interactive,
+        skip_upload=skip_upload,
+        skip_task=skip_task,
+        workspace=workspace_name,
+        api_url=api_url,
+        register=register,
+    )
+
+
+@cli.command(
+    "doctor",
+    cls=CheriCommand,
+    help="Cheri doctor - run diagnostic checks to verify your Cheri installation.",
+    short_help="Diagnose configuration and connectivity issues",
+    examples=[
+        "cheri doctor",
+        "cheri doctor --json",
+        "cheri doctor --release-check",
+    ],
+)
+@click.option("--json", "json_output", is_flag=True, help="Output results as JSON.")
+@click.option("--release-check", is_flag=True, help="Exit non-zero on critical issues.")
+def doctor_cmd(json_output: bool, release_check: bool) -> None:
+    exit_code = doctor(
+        console,
+        make_client(),
+        make_store(),
+        json_output=json_output,
+        release_check=release_check,
+    )
+    sys.exit(exit_code)
 
 
 @cli.group(
@@ -297,8 +383,9 @@ def config_check_cmd() -> None:
     invoke_without_command=True,
     help="Cheri workspace - manage workspaces.",
     short_help="Manage workspaces",
-    command_order=["create", "list", "use", "join"],
+    command_order=["status", "create", "list", "use", "join"],
     examples=[
+        "cheri workspace status",
         "cheri workspace list",
         "cheri workspace create --name docs",
         "cheri workspace use docs",
@@ -335,6 +422,21 @@ def workspace_group(ctx: click.Context, name: Optional[str]) -> None:
 @click.option("--name", required=True, help="Workspace name.")
 def workspace_create_cmd(name: str) -> None:
     create_workspace(console, make_client(), make_store(), name=name)
+
+
+@workspace_group.command(
+    "status",
+    cls=CheriCommand,
+    help="Cheri workspace status - show detailed status for the active workspace.",
+    short_help="Show active workspace status",
+    examples=[
+        "cheri workspace status",
+        "cheri workspace status --json",
+    ],
+)
+@click.option("--json", "json_output", is_flag=True, help="Output results as JSON.")
+def workspace_status_cmd(json_output: bool) -> None:
+    workspace_status(console, make_client(), make_store(), json_output=json_output)
 
 
 @workspace_group.command(
@@ -555,18 +657,22 @@ def activity_cmd(workspace: Optional[str]) -> None:
     invoke_without_command=True,
     help="Cheri task - create and manage automated sync tasks.",
     short_help="Create and manage sync tasks",
-    command_order=["create", "find", "list", "start", "stop", "remove", "run", "logs", "watch"],
+    command_order=["create", "find", "list", "start", "stop", "remove", "run", "logs", "watch", "scan", "dry-run"],
     examples=[
         "cheri task create --directory cheri_test_files --mode on-change",
         'cheri task create --directory "C:\\Users\\Name\\Desktop\\cheri_test_files" --mode on-change',
+        "cheri task create --interactive",
         "cheri task list",
         "cheri task stop task_ab12cd34",
         "cheri task start task_ab12cd34",
+        "cheri task dry-run task_ab12cd34",
+        "cheri task scan task_ab12cd34",
     ],
     suggestion_map={
         "delete": "remove",
         "pause": "stop",
         "resume": "start",
+        "dryrun": "dry-run",
     },
 )
 @click.pass_context
@@ -586,11 +692,13 @@ def task_group(ctx: click.Context) -> None:
         'cheri task create --directory "C:\\Users\\Name\\Desktop\\cheri_test_files" --mode on-change',
         "cheri task create --file notes.md --mode interval --every 10m",
         "cheri task create --directory Downloads --pick",
+        "cheri task create --interactive",
     ],
 )
 @task_definition_options
 @click.option("--no-start", is_flag=True, help="Create the task without starting background watching.")
 @click.option("--pick", is_flag=True, help="Show a selection list when Cheri finds matching folders or files.")
+@click.option("--interactive", "interactive", is_flag=True, help="Guided interactive task creation.")
 def task_create_cmd(
     task_file: Optional[str],
     task_directory: Optional[str],
@@ -606,28 +714,32 @@ def task_create_cmd(
     watch_poll_seconds: float,
     no_start: bool,
     pick: bool,
+    interactive: bool,
 ) -> None:
-    create_task(
-        console,
-        make_client(),
-        make_store(),
-        task_file=task_file,
-        task_directory=task_directory,
-        workspace=workspace,
-        mode=mode,
-        on_change=False,
-        instant=False,
-        every=every,
-        debounce_seconds=debounce_seconds,
-        recursive=recursive,
-        include_patterns=include_patterns,
-        exclude_patterns=exclude_patterns,
-        direction=direction,
-        conflict_strategy=conflict_strategy,
-        watch_poll_seconds=watch_poll_seconds,
-        no_start=no_start,
-        pick=pick,
-    )
+    if interactive:
+        create_task_interactive(console, make_client(), make_store())
+    else:
+        create_task(
+            console,
+            make_client(),
+            make_store(),
+            task_file=task_file,
+            task_directory=task_directory,
+            workspace=workspace,
+            mode=mode,
+            on_change=False,
+            instant=False,
+            every=every,
+            debounce_seconds=debounce_seconds,
+            recursive=recursive,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
+            direction=direction,
+            conflict_strategy=conflict_strategy,
+            watch_poll_seconds=watch_poll_seconds,
+            no_start=no_start,
+            pick=pick,
+        )
 
 
 @task_group.command(
@@ -785,6 +897,460 @@ def task_watch_cmd(
         poll_seconds=poll_seconds,
         background=background,
     )
+
+
+@task_group.command(
+    "dry-run",
+    cls=CheriCommand,
+    help="Cheri task dry-run - show files that would be uploaded without uploading.",
+    short_help="Show what would be uploaded",
+    examples=[
+        "cheri task dry-run task_ab12cd34",
+    ],
+)
+@click.argument("task_id")
+def task_dry_run_cmd(task_id: str) -> None:
+    dry_run_task(console, make_client(), make_store(), task_id)
+
+
+@task_group.command(
+    "scan",
+    cls=CheriCommand,
+    help="Cheri task scan - show current snapshot/diff state without uploading.",
+    short_help="Show current file state",
+    examples=[
+        "cheri task scan task_ab12cd34",
+    ],
+)
+@click.argument("task_id")
+def task_scan_cmd(task_id: str) -> None:
+    scan_task(console, make_client(), make_store(), task_id)
+
+
+@cli.group(
+    "storage",
+    cls=CheriGroup,
+    invoke_without_command=True,
+    help="Cheri storage - manage and inspect storage providers.",
+    short_help="Manage storage providers",
+    command_order=["providers", "status", "check"],
+    examples=[
+        "cheri storage providers",
+        "cheri storage status",
+        "cheri storage check",
+    ],
+)
+@click.pass_context
+def storage_group(ctx: click.Context) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    list_storage_providers(make_client())
+
+
+@storage_group.command(
+    "providers",
+    cls=CheriCommand,
+    help="Cheri storage providers - list all available storage providers.",
+    short_help="List available storage providers",
+    examples=[
+        "cheri storage providers",
+        "cheri storage providers --include-experimental",
+    ],
+)
+@click.option("--include-experimental", is_flag=True, help="Show experimental providers.")
+def storage_providers_cmd(include_experimental: bool) -> None:
+    list_storage_providers(make_client(), include_experimental=include_experimental)
+
+
+@storage_group.command(
+    "status",
+    cls=CheriCommand,
+    help="Cheri storage status - show the active storage provider for the current workspace.",
+    short_help="Show active workspace storage status",
+    examples=[
+        "cheri storage status",
+        "cheri storage status --workspace docs",
+    ],
+)
+@workspace_option
+def storage_status_cmd(workspace: Optional[str]) -> None:
+    show_storage_status(make_client(), make_store(), workspace_id=workspace)
+
+
+@storage_group.command(
+    "configure",
+    cls=CheriCommand,
+    help="Cheri storage configure - set the storage provider for the active workspace.",
+    short_help="Configure storage provider",
+    examples=[
+        "cheri storage configure --provider system",
+        "cheri storage configure --provider s3-compatible",
+        "cheri storage configure --provider s3-compatible --include-experimental",
+    ],
+)
+@click.option("--provider", "provider_kind", default=None, help="Provider kind: system, s3-compatible, backblaze-b2.")
+@click.option("--include-experimental", is_flag=True, help="Allow experimental providers.")
+@workspace_option
+def storage_configure_cmd(provider_kind: Optional[str], include_experimental: bool, workspace: Optional[str]) -> None:
+    configure_storage_provider(console, make_client(), make_store(), provider_kind=provider_kind, include_experimental=include_experimental, workspace=workspace)
+
+
+@storage_group.command(
+    "check",
+    cls=CheriCommand,
+    help="Cheri storage check - verify storage provider connectivity.",
+    short_help="Check storage connectivity",
+    examples=[
+        "cheri storage check",
+    ],
+)
+def storage_check_cmd() -> None:
+    check_storage_connectivity(make_client())
+
+
+@storage_group.group(
+    "migrate",
+    cls=CheriGroup,
+    help="Cheri storage migrate - inspect what a storage provider migration would do.",
+    short_help="Plan storage migration",
+    command_order=["plan", "dry-run"],
+    examples=[
+        "cheri storage migrate plan --to s3-compatible",
+        "cheri storage migrate dry-run --to s3-compatible",
+    ],
+)
+def storage_migrate_group() -> None:
+    pass
+
+
+@storage_migrate_group.command(
+    "plan",
+    cls=CheriCommand,
+    help="Cheri storage migrate plan - show what a storage migration to a new provider would involve.",
+    short_help="Plan storage migration",
+    examples=[
+        "cheri storage migrate plan --to s3-compatible",
+    ],
+)
+@click.option("--to", "target_provider", required=True, help="Target provider kind: s3-compatible, backblaze-b2.")
+@workspace_option
+def storage_migrate_plan_cmd(target_provider: str, workspace: Optional[str]) -> None:
+    storage_migrate_plan(console, make_client(), make_store(), target_provider=target_provider, workspace=workspace)
+
+
+@storage_migrate_group.command(
+    "dry-run",
+    cls=CheriCommand,
+    help="Cheri storage migrate dry-run - show what WOULD be migrated without copying files.",
+    short_help="Dry-run storage migration",
+    examples=[
+        "cheri storage migrate dry-run --to s3-compatible",
+    ],
+)
+@click.option("--to", "target_provider", required=True, help="Target provider kind: s3-compatible, backblaze-b2.")
+@workspace_option
+def storage_migrate_dry_run_cmd(target_provider: str, workspace: Optional[str]) -> None:
+    storage_migrate_dry_run(console, make_client(), make_store(), target_provider=target_provider, workspace=workspace)
+
+
+@cli.group(
+    "handoff",
+    cls=CheriGroup,
+    invoke_without_command=True,
+    help="Cheri handoff - create and manage agent artifact handoffs.",
+    short_help="Create and manage agent artifact handoffs",
+    command_order=["create", "push", "list", "show", "pull", "latest", "bundle", "inspect"],
+    examples=[
+        "cheri handoff inspect reports",
+        "cheri handoff create reports --name 'v0.4 implementation'",
+        "cheri handoff push reports --name 'v0.4 implementation' --workspace myteam",
+        "cheri handoff list",
+        "cheri handoff latest",
+    ],
+    suggestion_map={},
+)
+@click.pass_context
+def handoff_group(ctx: click.Context) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    # Show help if no subcommand
+    click.echo(ctx.get_help())
+
+
+@handoff_group.command(
+    "create",
+    cls=CheriCommand,
+    help="Cheri handoff create - create a local handoff manifest without uploading.",
+    short_help="Create a local handoff manifest",
+    examples=[
+        "cheri handoff create reports --name 'v0.4 implementation'",
+        "cheri handoff create ./output --name 'build artifacts' --agent claude-code --tag release",
+    ],
+)
+@click.argument("path", type=click.Path(exists=False, file_okay=True, dir_okay=True, path_type=Path))
+@click.option("--name", required=True, help="Handoff name.")
+@click.option("--description", default="", help="Handoff description.")
+@click.option("--tag", "tags", multiple=True, help="Tags for the handoff.")
+@click.option("--agent", "agent_name", default=None, help="Agent name (e.g., claude-code, codex).")
+@click.option("--tool", "tool_name", default=None, help="Tool name used to generate artifacts.")
+@click.option("--version-label", default=None, help="Version label for the artifacts.")
+@click.option("--include-sensitive", is_flag=True, help="Include secret files (requires explicit confirmation).")
+def handoff_create_cmd(
+    path: Path,
+    name: str,
+    description: str,
+    tags: tuple[str, ...],
+    agent_name: Optional[str],
+    tool_name: Optional[str],
+    version_label: Optional[str],
+    include_sensitive: bool,
+) -> None:
+    handoff_create(
+        console,
+        make_client(),
+        make_store(),
+        str(path),
+        name=name,
+        description=description,
+        tags=tags,
+        agent_name=agent_name,
+        tool_name=tool_name,
+        version_label=version_label,
+        include_sensitive=include_sensitive,
+    )
+
+
+@handoff_group.command(
+    "push",
+    cls=CheriCommand,
+    help="Cheri handoff push - create a manifest and upload safe files to a workspace.",
+    short_help="Create manifest and upload to workspace",
+    examples=[
+        "cheri handoff push reports --name 'v0.4 implementation' --workspace myteam",
+        "cheri handoff push ./output --name 'build artifacts' --agent claude-code --tag release",
+    ],
+)
+@click.argument("path", type=click.Path(exists=False, file_okay=True, dir_okay=True, path_type=Path))
+@click.option("--name", required=True, help="Handoff name.")
+@click.option("--workspace", "workspace_id", default=None, help="Target workspace id or name.")
+@click.option("--description", default="", help="Handoff description.")
+@click.option("--tag", "tags", multiple=True, help="Tags for the handoff.")
+@click.option("--agent", "agent_name", default=None, help="Agent name (e.g., claude-code, codex).")
+@click.option("--tool", "tool_name", default=None, help="Tool name used to generate artifacts.")
+@click.option("--version-label", default=None, help="Version label for the artifacts.")
+@click.option("--include-sensitive", is_flag=True, help="Include secret files (requires explicit confirmation).")
+@click.option("--allow-partial", is_flag=True, help="Allow partial success (exit 0 even if some files fail).")
+def handoff_push_cmd(
+    path: Path,
+    name: str,
+    workspace_id: Optional[str],
+    description: str,
+    tags: tuple[str, ...],
+    agent_name: Optional[str],
+    tool_name: Optional[str],
+    version_label: Optional[str],
+    include_sensitive: bool,
+    allow_partial: bool,
+) -> None:
+    exit_code = handoff_push(
+        console,
+        make_client(),
+        make_store(),
+        str(path),
+        name=name,
+        workspace=workspace_id,
+        description=description,
+        tags=tags,
+        agent_name=agent_name,
+        tool_name=tool_name,
+        version_label=version_label,
+        include_sensitive=include_sensitive,
+        allow_partial=allow_partial,
+    )
+    if exit_code:
+        sys.exit(exit_code)
+
+
+@handoff_group.command(
+    "list",
+    cls=CheriCommand,
+    help="Cheri handoff list - list recent handoffs in the active workspace.",
+    short_help="List workspace handoffs",
+    examples=[
+        "cheri handoff list",
+        "cheri handoff list --workspace myteam",
+        "cheri handoff list --agent claude-code",
+        "cheri handoff list --tag release --status ready",
+        "cheri handoff list --since 2026-05-01 --until 2026-05-30",
+    ],
+)
+@workspace_option
+@click.option("--agent", default=None, help="Filter by agent name (e.g., claude-code, codex).")
+@click.option("--tag", default=None, help="Filter by tag.")
+@click.option("--since", default=None, help="Filter handoffs created on or after this date (YYYY-MM-DD).")
+@click.option("--until", default=None, help="Filter handoffs created on or before this date (YYYY-MM-DD).")
+@click.option("--status", "status_filter", default=None, help="Filter by status (ready, partial_failed, created).")
+def handoff_list_cmd(
+    workspace: Optional[str],
+    agent: Optional[str],
+    tag: Optional[str],
+    since: Optional[str],
+    until: Optional[str],
+    status_filter: Optional[str],
+) -> None:
+    handoff_list(
+        console,
+        make_client(),
+        make_store(),
+        workspace=workspace,
+        agent=agent,
+        tag=tag,
+        since=since,
+        until=until,
+        status_filter=status_filter,
+    )
+
+
+@handoff_group.command(
+    "show",
+    cls=CheriCommand,
+    help="Cheri handoff show - show metadata and file list for a handoff.",
+    short_help="Show handoff details",
+    examples=[
+        "cheri handoff show hnd_abc123def456",
+    ],
+)
+@click.argument("handoff_id")
+def handoff_show_cmd(handoff_id: str) -> None:
+    handoff_show(console, make_client(), make_store(), handoff_id)
+
+
+@handoff_group.command(
+    "pull",
+    cls=CheriCommand,
+    help="Cheri handoff pull - download handoff files to a local folder.",
+    short_help="Download handoff files",
+    examples=[
+        "cheri handoff pull hnd_abc123def456",
+        "cheri handoff pull hnd_abc123def456 --dest ./my-handoff",
+        "cheri handoff pull hnd_abc123def456 --allow-partial",
+    ],
+)
+@click.argument("handoff_id")
+@click.option("--dest", type=click.Path(path_type=Path), default=None, help="Destination directory.")
+@click.option("--allow-partial", is_flag=True, help="Allow partial success (exit 0 even on checksum mismatch).")
+def handoff_pull_cmd(handoff_id: str, dest: Optional[Path], allow_partial: bool) -> None:
+    exit_code = handoff_pull(console, make_client(), make_store(), handoff_id, str(dest) if dest else None, allow_partial=allow_partial)
+    if exit_code:
+        sys.exit(exit_code)
+
+
+@handoff_group.command(
+    "latest",
+    cls=CheriCommand,
+    help="Cheri handoff latest - show the most recent handoff for the workspace.",
+    short_help="Show latest handoff",
+    examples=[
+        "cheri handoff latest",
+        "cheri handoff latest --workspace myteam",
+    ],
+)
+@workspace_option
+def handoff_latest_cmd(workspace: Optional[str]) -> None:
+    handoff_latest(console, make_client(), make_store(), workspace=workspace)
+
+
+@handoff_group.command(
+    "bundle",
+    cls=CheriCommand,
+    help="Cheri handoff bundle - create a compressed archive of a path.",
+    short_help="Create a bundle archive",
+    examples=[
+        "cheri handoff bundle reports --name 'v0.4 artifacts'",
+    ],
+)
+@click.argument("path", type=click.Path(exists=False, file_okay=True, dir_okay=True, path_type=Path))
+@click.option("--name", required=True, help="Bundle name.")
+@click.option("--include-sensitive", is_flag=True, help="Include secret files.")
+def handoff_bundle_cmd(path: Path, name: str, include_sensitive: bool) -> None:
+    handoff_bundle(console, str(path), name, include_sensitive=include_sensitive)
+
+
+@handoff_group.command(
+    "inspect",
+    cls=CheriCommand,
+    help="Cheri handoff inspect - dry-run scan showing included/skipped files.",
+    short_help="Dry-run scan of a path",
+    examples=[
+        "cheri handoff inspect reports",
+        "cheri handoff inspect ./output",
+    ],
+)
+@click.argument("path", type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path))
+def handoff_inspect_cmd(path: Path) -> None:
+    handoff_inspect(console, str(path))
+
+
+@handoff_group.command(
+    "archive",
+    cls=CheriCommand,
+    help="Cheri handoff archive - archive a handoff (non-destructive).",
+    short_help="Archive a handoff",
+    examples=[
+        "cheri handoff archive hnd_abc123def456",
+    ],
+)
+@click.argument("handoff_id")
+def handoff_archive_cmd(handoff_id: str) -> None:
+    handoff_archive(console, make_client(), make_store(), handoff_id)
+
+
+@handoff_group.command(
+    "delete",
+    cls=CheriCommand,
+    help="Cheri handoff delete - permanently delete a handoff (requires confirmation).",
+    short_help="Permanently delete a handoff",
+    examples=[
+        "cheri handoff delete hnd_abc123def456",
+    ],
+)
+@click.argument("handoff_id")
+def handoff_delete_cmd(handoff_id: str) -> None:
+    handoff_delete(console, make_client(), make_store(), handoff_id)
+
+
+@handoff_group.command(
+    "diff",
+    cls=CheriCommand,
+    help="Cheri handoff diff - compare two handoffs (added/removed/modified files).",
+    short_help="Compare two handoffs",
+    examples=[
+        "cheri handoff diff hnd_abc123 hnd_def456",
+        "cheri handoff diff hnd_abc123 hnd_def456 --workspace myteam",
+    ],
+)
+@click.argument("handoff_id_1")
+@click.argument("handoff_id_2")
+@workspace_option
+def handoff_diff_cmd(handoff_id_1: str, handoff_id_2: str, workspace: Optional[str]) -> None:
+    handoff_diff(console, make_client(), make_store(), handoff_id_1, handoff_id_2)
+
+
+@cli.command(
+    "logs",
+    cls=CheriCommand,
+    help="Cheri logs - show operation logs.",
+    short_help="Show operation logs",
+    examples=[
+        "cheri logs",
+        "cheri logs --handoff hnd_abc123def456",
+        "cheri logs --json",
+    ],
+)
+@click.option("--handoff", default=None, help="Filter logs by handoff ID.")
+@click.option("--json", "json_output", is_flag=True, help="Output logs as JSON.")
+def logs_cmd(handoff: Optional[str], json_output: bool) -> None:
+    show_logs(console, None, None, handoff_id=handoff, json_output=json_output)
 
 
 @cli.command(

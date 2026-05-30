@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -182,14 +181,14 @@ def write_manifest(manifest: dict, output_dir: str) -> Path:
     return manifest_path
 
 
-def list_handoffs(client: CheriClient, store: JsonCredentialStore, workspace_id: Optional[str] = None) -> list[dict]:
-    """List handoffs in a workspace."""
+def list_handoffs(client: CheriClient, store: JsonCredentialStore, workspace_id: Optional[str] = None, params: Optional[dict] = None) -> list[dict]:
+    """List handoffs in a workspace with optional filter params."""
     state = load_authenticated_state(client, store)
     if not state.active_workspace:
         raise ValueError("No active workspace. Use --workspace to specify one.")
 
     ws_id = workspace_id or state.active_workspace.id
-    return client.list_handoffs(state, ws_id)
+    return client.list_handoffs(state, ws_id, params=params or {})
 
 
 def get_handoff(client: CheriClient, store: JsonCredentialStore, handoff_id: str) -> dict:

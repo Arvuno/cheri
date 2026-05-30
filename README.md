@@ -5,7 +5,8 @@
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white&style=flat-square)
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white&style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Beta-orange?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Public%20Beta-orange?style=flat-square)
+![Version](https://img.shields.io/badge/Version-0.8.0b1-blue?style=flat-square)
 
 **CLI-first collaborative workspace sync tool**
 
@@ -33,14 +34,25 @@ Built on **Cloudflare Workers** (API) + **KV** (metadata) + **R2** (blob storage
 
 ## Current Status
 
+**v0.8.0-public-beta** — Public beta release with improved release hygiene and documentation.
+
 | Ready | Limited |
 |-------|---------|
-| ✅ register / login / logout | ⚠️ Only `System (recommended)` is production-ready |
-| ✅ workspace create / list / use / join | ⚠️ S3, Google Drive, B2 are scaffolded |
-| ✅ file upload / download / list | ⚠️ Upload-only sync (no bidirectional yet) |
-| ✅ team invite / list / invite-reset | ⚠️ No conflict resolution |
-| ✅ activity feed | ⚠️ No bidirectional sync |
-| ✅ task create / list / start / stop / run / logs / watch | |
+| ✅ register / login / logout | ⚠️ `System (recommended)` is the only production-ready provider |
+| ✅ workspace create / list / use / join | ⚠️ S3-compatible provider is experimental (upload/download e2e pending) |
+| ✅ file upload / download / list | ⚠️ Google Drive, Backblaze B2 are docs-only |
+| ✅ team invite / list / invite-reset | ⚠️ Upload-only sync (no bidirectional yet) |
+| ✅ activity feed | ⚠️ No conflict resolution |
+| ✅ task create / list / start / stop / run / logs / watch | ⚠️ Daily file reset (System provider) |
+
+### Storage Provider Status
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| **System (recommended)** | ✅ Production-ready | Cloudflare R2, daily reset |
+| **S3-compatible** | ⚠️ Experimental | MinIO/Backblaze B2 tested via config validation; upload/download e2e pending |
+| **Google Drive** | 📄 Docs-only | Not implemented |
+| **Backblaze B2** | 📄 Docs-only | S3-compatible mode possible but not tested |
 
 ## Quick Start
 
@@ -103,6 +115,24 @@ cheri --help
 | `cheri teams invite` / `list` / `invite-reset` | Team collaboration |
 | `cheri activity` | View team activity feed |
 | `cheri task create` / `list` / `start` / `stop` / `run` / `logs` / `watch` | Task automation |
+
+### Agent Handoff
+
+Cheri supports agent-to-agent artifact handoff for LLM workflows:
+
+```bash
+# Push artifacts from current directory
+cheri handoff push --name "sprint-23-results" --tag analysis --agent claude
+
+# Pull artifacts to current directory
+cheri handoff pull <handoff-id>
+
+# List recent handoffs
+cheri handoff list --agent claude --since 2026-05-01
+
+# Compare two handoffs
+cheri handoff diff <handoff-1> <handoff-2>
+```
 
 ### Invite / Collaboration Flow
 
@@ -223,10 +253,21 @@ Required bindings: `HERMES_KV`, `HERMES_BUCKET`
 | Limitation | Impact |
 |------------|--------|
 | Only `System (recommended)` is production-ready | Limited storage provider options |
+| S3-compatible upload/download e2e pending | MinIO/B2 not fully tested |
 | Upload-only sync | No bidirectional/remote delete reconciliation |
 | No conflict resolution | Manual conflict handling required |
 | Local secret storage not encrypted at rest | Security consideration for shared machines |
-| Bootstrap secret not an invite code | Different purposes in the auth flow |
+| Daily file reset (System provider) | Files are cleaned up daily |
+
+## Roadmap (v0.9+)
+
+| Feature | Target | Status |
+|---------|--------|--------|
+| S3-compatible provider e2e testing | v0.9 | Pending |
+| Multipart upload for large files | v0.9 | Pending |
+| Bidirectional sync | Future | Not started |
+| Conflict resolution UI | Future | Not started |
+| Google Drive provider | Future | Docs-only |
 
 ## Security Notes
 

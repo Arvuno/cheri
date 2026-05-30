@@ -265,8 +265,12 @@ class CheriClient:
             },
         )
 
-    def list_handoffs(self, state: AuthState, workspace_id: str) -> List[Dict[str, Any]]:
-        payload = self._request("get", "/v1/handoffs", state=state, workspace_id=workspace_id)
+    def list_handoffs(self, state: AuthState, workspace_id: str, *, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        query = ""
+        if params:
+            from urllib.parse import urlencode
+            query = "?" + urlencode(params)
+        payload = self._request("get", f"/v1/handoffs{query}", state=state, workspace_id=workspace_id)
         return list(payload.get("handoffs", []))
 
     def get_handoff(self, state: AuthState, handoff_id: str) -> Dict[str, Any]:

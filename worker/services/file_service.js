@@ -73,9 +73,8 @@ export async function createUploadGrant(env, workspace, user, body, origin) {
   const uploadToken = createGrantToken();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const uploadTarget = await provider.generateUploadTarget({
-    workspace,
-    file,
-    expires_at: expiresAt,
+    providerObjectKey: file.provider_object_key,
+    providerObjectId: file.provider_object_id,
   });
   await saveUploadGrant(env, uploadToken, {
     workspace_id: workspace.id,
@@ -179,9 +178,8 @@ export async function createDownloadGrant(env, workspace, user, fileId, origin) 
   const downloadToken = createGrantToken();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const downloadTarget = await provider.generateDownloadTarget({
-    workspace,
-    file,
-    expires_at: expiresAt,
+    providerObjectKey: file.provider_object_key,
+    providerObjectId: file.provider_object_id,
   });
   await saveDownloadGrant(env, downloadToken, {
     workspace_id: workspace.id,

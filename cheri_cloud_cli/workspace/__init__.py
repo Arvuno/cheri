@@ -9,6 +9,7 @@ from .service import (
     resolve_workspace_id,
     resolve_workspace_reference,
     use_workspace,
+    workspace_status,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "resolve_workspace_id",
     "resolve_workspace_reference",
     "use_workspace",
+    "workspace_status",
 ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence
 
@@ -40,6 +40,7 @@ class TaskExecutionResult:
     deleted_paths: list[str]
     uploaded_count: int
     dry_run: bool = False
+    skipped_sensitive: list[str] = field(default_factory=list)
 
 
 class TaskService:
@@ -300,6 +301,7 @@ class TaskService:
                 deleted_paths=list(scan.deleted_paths),
                 uploaded_count=uploaded_count,
                 dry_run=dry_run,
+                skipped_sensitive=list(scan.skipped_sensitive),
             )
         except Exception as exc:
             finished_at = iso_now()

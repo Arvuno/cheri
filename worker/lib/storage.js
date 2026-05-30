@@ -266,18 +266,127 @@ export async function deleteTaskRecord(env, workspaceId, taskId) {
   await kvDelete(env, `${KEY_PREFIX.TASK}${workspaceId}:${taskId}`);
 }
 
+// ---- AES-GCM provider secret encryption helpers ----
+const ALGORITHM = "AES-GCM";
+const KEY_LENGTH = 256;
+const NONCE_LENGTH = 12;
+const CURRENT_ENC_VERSION = 1;
+
+async function deriveKey(rawSecret) {
+  const encoder = new TextEncoder();
+  const keyMaterial = await globalThis.crypto.subtle.importKey(
+    "raw", encoder.encode(rawSecret), "HKDF", false, ["deriveKey"],
+  );
+  return globalThis.crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: encoder.encode("cheri-provider-secret-v1"), info: new Uint8Array(0) },
+    keyMaterial,
+    { name: ALGORITHM, length: KEY_LENGTH },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+function b64Encode(bytes) {
+  return globalThis.btoa(String.fromCharCode(...bytes));
+}
+
+function b64Decode(base64) {
+  const binary = globalThis.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function encryptSecret(plaintext, rawSecret) {
+  if (!rawSecret) return plaintext;
+  const key = await deriveKey(rawSecret);
+  const nonce = globalThis.crypto.getRandomValues(new Uint8Array(NONCE_LENGTH));
+  const ciphertext = await globalThis.crypto.subtle.encrypt(
+    { name: ALGORITHM, iv: nonce },
+    key,
+    new TextEncoder().encode(plaintext),
+  );
+  return JSON.stringify({ v: CURRENT_ENC_VERSION, nonce: b64Encode(nonce), ct: b64Encode(new Uint8Array(ciphertext)) });
+}
+
+async function decryptSecret(encryptedPayload, rawSecret) {
+  if (!rawSecret) return encryptedPayload;
+  const payload = JSON.parse(encryptedPayload);
+  if (payload.v !== CURRENT_ENC_VERSION) throw new Error(`Unsupported secret payload version: ${payload.v}`);
+  const key = await deriveKey(rawSecret);
+  const decrypted = await globalThis.crypto.subtle.decrypt(
+    { name: ALGORITHM, iv: b64Decode(payload.nonce) },
+    key,
+    b64Decode(payload.ct),
+  );
+  return new TextDecoder().decode(decrypted);
+}
+
+function isEncryptedSecretRecord(record) {
+  return record && typeof record === "object" && record.v === CURRENT_ENC_VERSION;
+}
+
 export async function saveProviderSecrets(env, workspaceId, providerKind, payload) {
   const key = `${KEY_PREFIX.PROVIDER_SECRET}${workspaceId}:${providerKind}`;
-  await kvSet(env, key, {
+  const rawSecret = env?.CHERI_PROVIDER_SECRET_KEY;
+  const secretSettings = payload?.secret_settings || {};
+  const encryptedSecrets = {};
+  for (const [k, v] of Object.entries(secretSettings)) {
+    if (typeof v === 'string' && v) {
+      encryptedSecrets[k] = rawSecret ? await encryptSecret(v, rawSecret) : v;
+    } else {
+      encryptedSecrets[k] = v;
+    }
+  }
+  const record = {
     workspace_id: workspaceId,
     provider_kind: providerKind,
     updated_at: isoNow(),
-    ...payload,
-  });
+    secret_settings: encryptedSecrets,
+    _encrypted: !!rawSecret,
+  };
+  await kvSet(env, key, record);
 }
 
 export async function loadProviderSecrets(env, workspaceId, providerKind) {
-  return kvGet(env, `${KEY_PREFIX.PROVIDER_SECRET}${workspaceId}:${providerKind}`);
+  const rawSecret = env?.CHERI_PROVIDER_SECRET_KEY;
+  const record = await kvGet(env, `${KEY_PREFIX.PROVIDER_SECRET}${workspaceId}:${providerKind}`);
+  if (!record) return null;
+  if (!isEncryptedSecretRecord(record) && !record._encrypted && record.secret_settings) {
+    const migrated = {};
+    for (const [k, v] of Object.entries(record.secret_settings)) {
+      if (typeof v === 'string' && v && rawSecret) {
+        migrated[k] = await encryptSecret(v, rawSecret);
+      } else {
+        migrated[k] = v;
+      }
+    }
+    const key = `${KEY_PREFIX.PROVIDER_SECRET}${workspaceId}:${providerKind}`;
+    const newRecord = { ...record, secret_settings: migrated, _encrypted: !!rawSecret };
+    await kvSet(env, key, newRecord);
+    return { secret_settings: migrated };
+  }
+  if (record._encrypted && rawSecret && record.secret_settings) {
+    const decrypted = {};
+    for (const [k, v] of Object.entries(record.secret_settings)) {
+      if (typeof v === 'string' && v) {
+        try {
+          const parsed = JSON.parse(v);
+          if (parsed.v === CURRENT_ENC_VERSION) {
+            decrypted[k] = await decryptSecret(v, rawSecret);
+          } else {
+            decrypted[k] = v;
+          }
+        } catch {
+          decrypted[k] = v;
+        }
+      } else {
+        decrypted[k] = v;
+      }
+    }
+    return { secret_settings: decrypted };
+  }
+  return record;
 }
 
 export async function deleteProviderSecrets(env, workspaceId, providerKind) {

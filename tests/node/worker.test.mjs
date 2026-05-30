@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
-import worker from "../../worker/index.js";
+const require = createRequire(import.meta.url);
+const worker = require("../../worker/index.js").default;
 
 class FakeKV {
   constructor() {
@@ -8,11 +10,14 @@ class FakeKV {
   }
 
   async get(key) {
-    return this.store.get(key) ?? null;
+    const raw = this.store.get(key) ?? null;
+    if (raw === null) return null;
+    // Cloudflare KV returns raw strings - caller is responsible for JSON.parse
+    return raw;
   }
 
   async put(key, value) {
-    this.store.set(key, value);
+    this.store.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
 
   async delete(key) {
@@ -399,4 +404,146 @@ await runCase("worker only returns CORS headers for explicitly allowed origins",
     origin: "https://allowed.example",
   });
   assert.equal(withAllowedOrigin.headers.get("access-control-allow-origin"), "https://allowed.example");
+});
+
+await runCase("handoff routes create, list, show, and get latest handoff metadata", async () => {
+  const env = makeEnv();
+
+  const registerCarol = await jsonResponse(env, "/v1/auth/register", {
+    method: "POST",
+    json: {
+      username: "carol",
+      workspace_name: "handoff workspace",
+      provider: systemProviderSelection(),
+    },
+  });
+  assert.equal(registerCarol.response.status, 201);
+  const carolToken = registerCarol.payload.session.token;
+  const carolWorkspaceId = registerCarol.payload.workspace_access.active_workspace_id;
+
+  // Create a handoff
+  const createHandoff = await jsonResponse(env, "/v1/handoffs", {
+    method: "POST",
+    token: carolToken,
+    workspaceId: carolWorkspaceId,
+    json: {
+      handoff_id: "hnd_test_001",
+      name: "test artifact handoff",
+      description: "handoff for testing",
+      tags: ["test", "demo"],
+      source_path: "/local/path/to/artifacts",
+      file_count: 5,
+      total_size: 1024,
+      manifest_path: "cheri-handoff.json",
+      agent_name: "claude-code",
+      tool_name: "handoff-cli",
+      version_label: "v0.5.0",
+      git_branch: "main",
+      git_commit: "abc123def456",
+      notes: "test handoff notes",
+    },
+  });
+  assert.equal(createHandoff.response.status, 201);
+  assert.equal(createHandoff.payload.handoff.id, "hnd_test_001");
+  assert.equal(createHandoff.payload.handoff.name, "test artifact handoff");
+  assert.equal(createHandoff.payload.handoff.workspace_id, carolWorkspaceId);
+  assert.equal(createHandoff.payload.handoff.agent_name, "claude-code");
+  assert.equal(createHandoff.payload.handoff.file_count, 5);
+  assert.equal(createHandoff.payload.handoff.status, "created");
+
+  // List handoffs
+  const listHandoffs = await jsonResponse(env, "/v1/handoffs", {
+    token: carolToken,
+    workspaceId: carolWorkspaceId,
+  });
+  assert.equal(listHandoffs.response.status, 200);
+  assert.ok(Array.isArray(listHandoffs.payload.handoffs));
+  assert.ok(listHandoffs.payload.handoffs.length >= 1);
+  const foundHandoff = listHandoffs.payload.handoffs.find((h) => h.id === "hnd_test_001");
+  assert.ok(foundHandoff, "created handoff should appear in list");
+
+  // Get single handoff
+  const getHandoff = await jsonResponse(env, "/v1/handoffs/hnd_test_001", {
+    token: carolToken,
+    workspaceId: carolWorkspaceId,
+  });
+  assert.equal(getHandoff.response.status, 200);
+  assert.equal(getHandoff.payload.handoff.id, "hnd_test_001");
+  assert.equal(getHandoff.payload.handoff.name, "test artifact handoff");
+  assert.equal(getHandoff.payload.handoff.description, "handoff for testing");
+  assert.deepEqual(getHandoff.payload.handoff.tags, ["test", "demo"]);
+
+  // Get latest handoff
+  const getLatest = await jsonResponse(env, "/v1/handoffs/latest", {
+    token: carolToken,
+    workspaceId: carolWorkspaceId,
+  });
+  assert.equal(getLatest.response.status, 200);
+  assert.ok(getLatest.payload.handoff);
+  assert.equal(getLatest.payload.handoff.id, "hnd_test_001");
+
+  // Unauthorized access - no token
+  const noTokenList = await jsonResponse(env, "/v1/handoffs", {
+    workspaceId: carolWorkspaceId,
+  });
+  assert.equal(noTokenList.response.status, 401);
+
+  // Cross-workspace access - different user's workspace
+  const registerDave = await jsonResponse(env, "/v1/auth/register", {
+    method: "POST",
+    json: {
+      username: "dave",
+      workspace_name: "dave workspace",
+      provider: systemProviderSelection(),
+    },
+  });
+  const daveToken = registerDave.payload.session.token;
+
+  const crossWorkspaceGet = await jsonResponse(env, "/v1/handoffs/hnd_test_001", {
+    token: daveToken,
+    workspaceId: carolWorkspaceId,
+  });
+  // Workspace ID mismatch should return 401/403 or empty/null result
+  if (crossWorkspaceGet.response.status === 200) {
+    assert.equal(crossWorkspaceGet.payload.handoff, null);
+  } else {
+    // 401 = unauthorized (no session), 403 = forbidden (authenticated but not authorized)
+    assert.ok([401, 403].includes(crossWorkspaceGet.response.status), `Expected 401 or 403, got ${crossWorkspaceGet.response.status}`);
+  }
+});
+
+await runCase("handoff create requires workspace membership", async () => {
+  const env = makeEnv();
+
+  const registerEve = await jsonResponse(env, "/v1/auth/register", {
+    method: "POST",
+    json: {
+      username: "eve",
+      workspace_name: "eve workspace",
+      provider: systemProviderSelection(),
+    },
+  });
+  const eveToken = registerEve.payload.session.token;
+  const eveWorkspaceId = registerEve.payload.workspace_access.active_workspace_id;
+
+  // Eve creates a handoff in her workspace
+  const eveHandoff = await jsonResponse(env, "/v1/handoffs", {
+    method: "POST",
+    token: eveToken,
+    workspaceId: eveWorkspaceId,
+    json: {
+      handoff_id: "hnd_eve_001",
+      name: "eve's handoff",
+      file_count: 1,
+      total_size: 100,
+    },
+  });
+  assert.equal(eveHandoff.response.status, 201);
+
+  // Verify it appears in Eve's list
+  const eveList = await jsonResponse(env, "/v1/handoffs", {
+    token: eveToken,
+    workspaceId: eveWorkspaceId,
+  });
+  assert.ok(eveList.payload.handoffs.some((h) => h.id === "hnd_eve_001"));
 });

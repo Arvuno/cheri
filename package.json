@@ -1,7 +1,7 @@
 {
   "name": "cheri",
-  "version": "1.0.0",
-  "description": "Cheri CLI launcher and Worker test scripts",
+  "version": "0.8.0b1",
+  "description": "CLI-first collaborative workspace sync for developer teams — agent artifact handoff",
   "type": "module",
   "bin": {
     "cheri": "bin/cheri.js"

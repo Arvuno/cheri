@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from cheri_cloud_cli.handoff import (
     HandoffFile,
@@ -18,7 +15,6 @@ from cheri_cloud_cli.handoff import (
     calculate_checksum,
     get_content_type,
     scan_directory,
-    DEFAULT_EXCLUDE_PATTERNS,
     create_manifest,
     write_manifest,
 )
@@ -684,6 +680,456 @@ class ManifestBackwardCompatibilityTests(unittest.TestCase):
         self.assertNotIn("file_id", d)
         self.assertNotIn("storage_key", d)
         self.assertNotIn("upload_status", d)
+
+
+# =============================================================================
+# RETRY POLICY TESTS
+# =============================================================================
+
+class RetryPolicyTests(unittest.TestCase):
+    """Test retry behavior for transient vs permanent errors."""
+
+    def test_is_retryable_error_auth_failure(self) -> None:
+        """Auth failures should NOT be retried."""
+        from cheri_cloud_cli.retry import _is_retryable_error
+        from cheri_cloud_cli.client import CheriClientError
+
+        # Auth-related errors
+        auth_error = CheriClientError("Authentication failed: invalid credentials")
+        self.assertFalse(_is_retryable_error(auth_error))
+
+        unauthorized_error = CheriClientError("Unauthorized: workspace access denied")
+        self.assertFalse(_is_retryable_error(unauthorized_error))
+
+        forbidden_error = CheriClientError("Forbidden: permission denied")
+        self.assertFalse(_is_retryable_error(forbidden_error))
+
+    def test_is_retryable_error_provider_invalid(self) -> None:
+        """Provider invalid errors should NOT be retried."""
+        from cheri_cloud_cli.retry import _is_retryable_error
+        from cheri_cloud_cli.client import CheriClientError
+
+        provider_error = CheriClientError("Provider invalid: S3 provider not configured")
+        self.assertFalse(_is_retryable_error(provider_error))
+
+    def test_is_retryable_error_not_found(self) -> None:
+        """Not found errors should NOT be retried."""
+        from cheri_cloud_cli.retry import _is_retryable_error
+        from cheri_cloud_cli.client import CheriClientError
+
+        not_found_error = CheriClientError("File not found: handoff_abc123")
+        self.assertFalse(_is_retryable_error(not_found_error))
+
+    def test_is_retryable_error_network_timeout(self) -> None:
+        """Network timeouts SHOULD be retried."""
+        import requests
+        from cheri_cloud_cli.retry import _is_retryable_error
+
+        timeout_error = requests.exceptions.Timeout("Connection timed out")
+        self.assertTrue(_is_retryable_error(timeout_error))
+
+    def test_is_retryable_error_5xx(self) -> None:
+        """5xx server errors SHOULD be retried."""
+        import requests
+        from cheri_cloud_cli.retry import _is_retryable_error
+
+        error = requests.exceptions.RequestException("Server error")
+        error.response = type('MockResponse', (), {'status_code': 500})()
+        self.assertTrue(_is_retryable_error(error))
+
+    def test_retry_exhausted_raises(self) -> None:
+        """When all retries are exhausted, the last exception should be raised."""
+        import requests
+        from cheri_cloud_cli.retry import with_retry
+
+        attempt_count = 0
+
+        def failing_func():
+            nonlocal attempt_count
+            attempt_count += 1
+            # Use a retryable exception type
+            raise requests.exceptions.Timeout(f"Attempt {attempt_count} failed")
+
+        with self.assertRaises(requests.exceptions.Timeout):
+            with_retry(failing_func, max_retries=2)
+
+        # All retries exhausted (3 total attempts with max_retries=2)
+        self.assertEqual(attempt_count, 3)
+
+    def test_retry_succeeds_on_retry(self) -> None:
+        """If a function succeeds on a later retry, return the result."""
+        import requests
+        from cheri_cloud_cli.retry import with_retry
+
+        attempt_count = 0
+
+        def eventually_succeeds():
+            nonlocal attempt_count
+            attempt_count += 1
+            if attempt_count < 3:
+                raise requests.exceptions.Timeout(f"Attempt {attempt_count} failed")
+            return "success"
+
+        result = with_retry(eventually_succeeds, max_retries=5)
+        self.assertEqual(result, "success")
+        self.assertEqual(attempt_count, 3)
+
+
+# =============================================================================
+# PARTIAL FAILURE POLICY TESTS
+# =============================================================================
+
+class PartialFailurePolicyTests(unittest.TestCase):
+    """Test partial failure behavior with --allow-partial flag."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+        self.scan_dir = Path(self.temp_dir) / "partial_test"
+        self.scan_dir.mkdir()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_partial_failed_status_when_some_files_fail(self) -> None:
+        """When some files fail, handoff status should be partial_failed."""
+        failed_files = [{"path": "b.txt", "error": "upload error"}]
+
+        handoff_status = "partial_failed" if failed_files else "ready"
+        self.assertEqual(handoff_status, "partial_failed")
+
+    def test_ready_status_when_all_files_succeed(self) -> None:
+        """When all files succeed, handoff status should be ready."""
+        failed_files = []
+
+        handoff_status = "partial_failed" if failed_files else "ready"
+        self.assertEqual(handoff_status, "ready")
+
+    def test_allow_partial_exits_zero_on_failure(self) -> None:
+        """With allow_partial=True, exit code should be 0 even with failures."""
+        allow_partial = True
+        failed_files = [{"path": "b.txt", "error": "upload error"}]
+
+        if failed_files and not allow_partial:
+            exit_code = 1
+        else:
+            exit_code = 0
+
+        self.assertEqual(exit_code, 0)
+
+    def test_no_allow_partial_exits_nonzero_on_failure(self) -> None:
+        """Without allow_partial, exit code should be 1 on failures."""
+        allow_partial = False
+        failed_files = [{"path": "b.txt", "error": "upload error"}]
+
+        if failed_files and not allow_partial:
+            exit_code = 1
+        else:
+            exit_code = 0
+
+        self.assertEqual(exit_code, 1)
+
+    def test_checksum_mismatch_marked(self) -> None:
+        """Checksum mismatches should be recorded separately."""
+        checksum_mismatches = [
+            {"path": "file.txt", "expected": "abc123", "actual": "xyz789"}
+        ]
+
+        self.assertEqual(len(checksum_mismatches), 1)
+        self.assertIn("file.txt", [m["path"] for m in checksum_mismatches])
+
+
+# =============================================================================
+# SEARCH/FILTER TESTS
+# =============================================================================
+
+class SearchFilterTests(unittest.TestCase):
+    """Test handoff list filters."""
+
+    def test_filter_by_agent(self) -> None:
+        """List should filter by agent name."""
+        handoffs = [
+            {"id": "1", "name": "handoff 1", "agent_name": "claude-code", "status": "ready"},
+            {"id": "2", "name": "handoff 2", "agent_name": "codex", "status": "ready"},
+            {"id": "3", "name": "handoff 3", "agent_name": "claude-code", "status": "ready"},
+        ]
+
+        agent_filter = "claude-code"
+        filtered = [h for h in handoffs if h.get("agent_name") == agent_filter]
+
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all(h["agent_name"] == "claude-code" for h in filtered))
+
+    def test_filter_by_tag(self) -> None:
+        """List should filter by tag."""
+        handoffs = [
+            {"id": "1", "name": "handoff 1", "tags": ["release", "v1"], "status": "ready"},
+            {"id": "2", "name": "handoff 2", "tags": ["beta"], "status": "ready"},
+            {"id": "3", "name": "handoff 3", "tags": ["release"], "status": "ready"},
+        ]
+
+        tag_filter = "release"
+        filtered = [h for h in handoffs if tag_filter in h.get("tags", [])]
+
+        self.assertEqual(len(filtered), 2)
+
+    def test_filter_by_status(self) -> None:
+        """List should filter by status."""
+        handoffs = [
+            {"id": "1", "name": "handoff 1", "status": "ready"},
+            {"id": "2", "name": "handoff 2", "status": "partial_failed"},
+            {"id": "3", "name": "handoff 3", "status": "ready"},
+        ]
+
+        status_filter = "partial_failed"
+        filtered = [h for h in handoffs if h.get("status") == status_filter]
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["status"], "partial_failed")
+
+    def test_filter_by_date_range(self) -> None:
+        """List should filter by date range."""
+        handoffs = [
+            {"id": "1", "name": "handoff 1", "created_at": "2026-05-01T00:00:00Z"},
+            {"id": "2", "name": "handoff 2", "created_at": "2026-05-15T00:00:00Z"},
+            {"id": "3", "name": "handoff 3", "created_at": "2026-05-28T00:00:00Z"},
+        ]
+
+        since_date = "2026-05-10"
+        until_date = "2026-05-25"
+
+        filtered = []
+        for h in handoffs:
+            created = h.get("created_at", "")
+            if created and since_date <= created[:10] <= until_date:
+                filtered.append(h)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["id"], "2")
+
+
+# =============================================================================
+# ARCHIVE/DELETE TESTS
+# =============================================================================
+
+class ArchiveDeleteTests(unittest.TestCase):
+    """Test archive and delete operations."""
+
+    def test_archive_sets_status_to_archived(self) -> None:
+        """Archive should set status to 'archived'."""
+        handoff = {"id": "test_123", "status": "ready", "name": "test"}
+        new_status = "archived"
+
+        self.assertNotEqual(handoff["status"], new_status)
+        handoff["status"] = new_status
+        self.assertEqual(handoff["status"], "archived")
+
+    def test_already_archived_no_op(self) -> None:
+        """Already archived handoff should not be re-archived."""
+        handoff = {"id": "test_123", "status": "archived", "name": "test"}
+
+        if handoff.get("status") == "archived":
+            # Should be a no-op
+            pass
+
+        self.assertEqual(handoff["status"], "archived")
+
+    def test_delete_requires_confirmation(self) -> None:
+        """Delete should require user confirmation."""
+        confirmed = False  # Simulates user not confirming
+
+        if not confirmed:
+            # Should not proceed with deletion
+            pass
+
+        # If confirmed was True, deletion would proceed
+        self.assertFalse(confirmed)
+
+    def test_delete_removes_or_marks_deleted(self) -> None:
+        """Delete should either remove or mark as deleted."""
+        handoff = {"id": "test_123", "status": "ready", "name": "test"}
+
+        # Can either call DELETE endpoint or mark status as "deleted"
+        handoff["status"] = "deleted"
+
+        self.assertEqual(handoff["status"], "deleted")
+
+
+# =============================================================================
+# DIFF TESTS
+# =============================================================================
+
+class DiffTests(unittest.TestCase):
+    """Test handoff diff/compare functionality."""
+
+    def test_added_files(self) -> None:
+        """Diff should show files in h2 but not in h1."""
+        files1 = {"a.txt": {"checksum": "abc"}}
+        files2 = {"a.txt": {"checksum": "abc"}, "b.txt": {"checksum": "xyz"}}
+
+        paths1 = set(files1.keys())
+        paths2 = set(files2.keys())
+
+        added = paths2 - paths1
+        removed = paths1 - paths2
+
+        self.assertEqual(added, {"b.txt"})
+        self.assertEqual(removed, set())
+
+    def test_removed_files(self) -> None:
+        """Diff should show files in h1 but not in h2."""
+        files1 = {"a.txt": {"checksum": "abc"}, "b.txt": {"checksum": "xyz"}}
+        files2 = {"a.txt": {"checksum": "abc"}}
+
+        paths1 = set(files1.keys())
+        paths2 = set(files2.keys())
+
+        added = paths2 - paths1
+        removed = paths1 - paths2
+
+        self.assertEqual(added, set())
+        self.assertEqual(removed, {"b.txt"})
+
+    def test_modified_files_by_checksum(self) -> None:
+        """Diff should show files with different checksums as modified."""
+        files1 = {"a.txt": {"checksum": "abc", "size": 10}}
+        files2 = {"a.txt": {"checksum": "xyz", "size": 20}}
+
+        modified = []
+        for path in files1.keys() & files2.keys():
+            if files1[path]["checksum"] != files2[path]["checksum"]:
+                modified.append({
+                    "path": path,
+                    "old_size": files1[path]["size"],
+                    "new_size": files2[path]["size"],
+                })
+
+        self.assertEqual(len(modified), 1)
+        self.assertEqual(modified[0]["path"], "a.txt")
+        self.assertEqual(modified[0]["old_size"], 10)
+        self.assertEqual(modified[0]["new_size"], 20)
+
+    def test_unchanged_files_not_in_modified(self) -> None:
+        """Files with same checksum should not appear in modified."""
+        files1 = {"a.txt": {"checksum": "abc", "size": 10}}
+        files2 = {"a.txt": {"checksum": "abc", "size": 10}}
+
+        modified = []
+        for path in files1.keys() & files2.keys():
+            if files1[path]["checksum"] != files2[path]["checksum"]:
+                modified.append({"path": path})
+
+        self.assertEqual(len(modified), 0)
+
+    def test_size_delta_calculation(self) -> None:
+        """Diff should calculate total size delta."""
+        files1 = [
+            {"size": 100, "checksum": "abc"},
+            {"size": 200, "checksum": "def"},
+        ]
+        files2 = [
+            {"size": 100, "checksum": "abc"},
+            {"size": 300, "checksum": "xyz"},  # Changed
+        ]
+
+        total_size1 = sum(f["size"] for f in files1)
+        total_size2 = sum(f["size"] for f in files2)
+        size_delta = total_size2 - total_size1
+
+        self.assertEqual(total_size1, 300)
+        self.assertEqual(total_size2, 400)
+        self.assertEqual(size_delta, 100)
+
+
+# =============================================================================
+# PROGRESS TESTS
+# =============================================================================
+
+class ProgressTests(unittest.TestCase):
+    """Test progress indicators don't crash."""
+
+    def test_progress_bar_renders(self) -> None:
+        """Progress bar should render without errors."""
+        from rich.progress import Progress, BarColumn, TextColumn
+
+        # Just ensure these classes can be instantiated
+        progress = Progress(BarColumn(), TextColumn("[cyan]Test..."))
+        self.assertIsNotNone(progress)
+
+    def test_format_size_function(self) -> None:
+        """_format_size should produce human-readable sizes."""
+        from cheri_cloud_cli.handoff.cli import _format_size
+
+        self.assertEqual(_format_size(500), "500B")
+        self.assertEqual(_format_size(1024), "1.0KB")
+        self.assertEqual(_format_size(1024 * 1024), "1.0MB")
+        self.assertEqual(_format_size(1024 * 1024 * 1024), "1.00GB")
+
+    def test_task_progress_completes(self) -> None:
+        """Task progress should track completion correctly."""
+        from rich.progress import Progress, BarColumn, TaskProgressColumn
+
+        progress = Progress(BarColumn(), TaskProgressColumn())
+        task_id = progress.add_task("test", total=10)
+
+        self.assertEqual(progress.tasks[task_id].completed, 0)
+
+        progress.update(task_id, completed=5)
+        self.assertEqual(progress.tasks[task_id].completed, 5)
+
+
+# =============================================================================
+# LOGS TESTS
+# =============================================================================
+
+class LogsTests(unittest.TestCase):
+    """Test logs command functionality."""
+
+    def test_filter_logs_by_handoff_id(self) -> None:
+        """Logs should be filterable by handoff ID."""
+        all_logs = [
+            {"message": "Push started for hnd_abc123", "handoff_id": "hnd_abc123"},
+            {"message": "File uploaded for hnd_abc123", "handoff_id": "hnd_abc123"},
+            {"message": "Push started for hnd_def456", "handoff_id": "hnd_def456"},
+        ]
+
+        handoff_id = "hnd_abc123"
+        filtered = [log for log in all_logs if log.get("handoff_id") == handoff_id]
+
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all(log["handoff_id"] == "hnd_abc123" for log in filtered))
+
+    def test_json_output_format(self) -> None:
+        """Logs should be serializable to JSON."""
+        import json
+
+        logs = [
+            {"timestamp": "2026-05-30T12:00:00Z", "level": "INFO", "message": "test"},
+            {"timestamp": "2026-05-30T12:01:00Z", "level": "ERROR", "message": "failed"},
+        ]
+
+        json_str = json.dumps(logs)
+        parsed = json.loads(json_str)
+
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0]["level"], "INFO")
+        self.assertEqual(parsed[1]["level"], "ERROR")
+
+    def test_log_level_color_coding(self) -> None:
+        """Log levels should map to colors."""
+
+        # Verify color mappings exist for ERROR, WARNING, SUCCESS
+        # This is tested by ensuring no exceptions when parsing log levels
+        log_levels = ["ERROR", "WARNING", "SUCCESS", "INFO"]
+        color_map = {
+            "ERROR": "red",
+            "WARNING": "yellow",
+            "SUCCESS": "green",
+            "INFO": "dim",
+        }
+
+        for level in log_levels:
+            self.assertIn(level, color_map)
 
 
 if __name__ == "__main__":

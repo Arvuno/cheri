@@ -2,12 +2,15 @@
 
 from .service import (
     create_task,
+    create_task_interactive,
+    dry_run_task,
     find_task_targets,
     list_tasks,
     pause_task,
     remove_task,
     resume_task,
     run_task,
+    scan_task,
     show_task_logs,
     start_task,
     stop_task,
@@ -16,12 +19,15 @@ from .service import (
 
 __all__ = [
     "create_task",
+    "create_task_interactive",
+    "dry_run_task",
     "find_task_targets",
     "list_tasks",
     "pause_task",
     "remove_task",
     "resume_task",
     "run_task",
+    "scan_task",
     "show_task_logs",
     "start_task",
     "stop_task",

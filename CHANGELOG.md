@@ -5,6 +5,43 @@ All notable changes to Cheri will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0-reliability] - 2026-05-30 - Reliability Hardening for Public Beta
+
+### Added
+- Retry with exponential backoff for handoff operations: upload grant creation, file upload transfer, complete upload, download grant creation, file download transfer, handoff metadata create/update
+- Retry policy only retries safe transient errors (network timeout, 5xx, throttling). Permanent errors (auth failure, workspace denied, provider invalid, file not found) fail immediately without retry
+- `cheri handoff list --agent <name>` filter for agent name
+- `cheri handoff list --tag <tag>` filter for tags
+- `cheri handoff list --since <date>` filter for start date
+- `cheri handoff list --until <date>` filter for end date
+- `cheri handoff list --status ready|partial_failed|created` filter for status
+- `cheri handoff archive <handoff-id>` for non-destructive archival
+- `cheri handoff delete <handoff-id>` for permanent deletion (requires confirmation)
+- `cheri handoff diff <handoff-id-1> <handoff-id-2>` to compare two handoffs (added/removed/modified files based on checksum)
+- Rich progress indicators for scanning files, uploading files, downloading files, checksum verification with file count, bytes, speed, and ETA
+- `cheri logs` command with `--handoff <id>` and `--json` options for operation logging
+- `cheri handoff pull --allow-partial` flag to allow partial success on checksum mismatch
+- `cheri handoff push --allow-partial` flag to allow partial success on upload failure
+
+### Changed
+- Version updated to `0.6.0-reliability`
+- Partial failure policy: handoff push marks `partial_failed` when some files fail, exits non-zero unless `--allow-partial` is passed
+- Partial failure policy: handoff pull records failed downloads and checksum mismatches, exits non-zero unless `--allow-partial` is passed
+- Handoff list now supports backend query filtering for agent, tag, date range, and status
+- Backend `GET /v1/handoffs` now accepts query parameters for filtering
+- Backend `DELETE /v1/handoffs/:id` for permanent deletion
+- Backend `PATCH /v1/handoffs/:id` for status update (archived)
+- Backend `GET /v1/handoffs/latest` excludes archived handoffs by default
+
+### Security
+- Archive/delete operations restricted to handoff creator or workspace admin
+- Delete requires explicit user confirmation before proceeding
+
+### Known Limitations
+- Diff command requires both handoffs to have manifests available via backend storage
+- Retry backoff uses fixed 1s/2s/4s/8s/16s pattern with 5 max retries
+- Logs are stored locally; no central log aggregation yet
+
 ## [0.5.1-handoff-content] - 2026-05-30 - Handoff Content Upload/Download
 
 ### Added

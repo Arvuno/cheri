@@ -1,0 +1,3 @@
+The crypto import issue is resolved by inlining the crypto utils directly.
+The fix replaces the external crypto.js import with inline implementations
+using globalThis.crypto (Node 24 built-in Web Crypto API).
