@@ -317,19 +317,28 @@ def list_handoffs(console: Console, client: CheriClient, store: JsonCredentialSt
 
     table = Table(box=None, border_style="cyan", title=f"Handoffs: {ws.name}")
     table.add_column("ID", style="cyan", width=16)
-    table.add_column("Name", style="white", width=32)
-    table.add_column("Files", justify="right", width=6)
-    table.add_column("Size", justify="right", width=12)
-    table.add_column("Agent", style="dim", width=16)
+    table.add_column("Name", style="white", width=24)
+    table.add_column("Status", style="white", width=14)
+    table.add_column("Files", justify="right", width=5)
+    table.add_column("Size", justify="right", width=10)
+    table.add_column("Provider", style="dim", width=10)
     table.add_column("Created", style="dim", width=20)
 
     for h in handoffs:
+        status = h.get("status", "unknown")
+        status_color = {
+            "ready": "green",
+            "partial_failed": "yellow",
+            "uploading": "cyan",
+            "created": "dim",
+        }.get(status, "white")
         table.add_row(
             h.get("id", "")[:16],
-            h.get("name", ""),
+            h.get("name", "")[:24],
+            f"[{status_color}]{status}[/{status_color}]",
             str(h.get("file_count", 0)),
-            _format_size(h.get("total_size", 0)),
-            h.get("agent_name", "-") or "-",
+            _format_size(h.get("total_uploaded_size", h.get("total_size", 0))),
+            h.get("provider_id", "-") or "-",
             h.get("created_at", "")[:19] if h.get("created_at") else "-",
         )
     console.print(table)
@@ -343,37 +352,70 @@ def show_handoff(console: Console, client: CheriClient, store: JsonCredentialSto
         console.print(f"[red]Error:[/] {exc}")
         return
 
+    status = h.get("status", "unknown")
+    status_color = {
+        "ready": "green",
+        "partial_failed": "yellow",
+        "uploading": "cyan",
+        "created": "dim",
+    }.get(status, "white")
+
     lines = [
-        f"ID          : {h.get('id', 'unknown')}",
-        f"Name        : {h.get('name', '')}",
-        f"Description : {h.get('description', '')}",
-        f"Workspace   : {h.get('workspace_id', '')}",
-        f"Files       : {h.get('file_count', 0)}",
-        f"Total size  : {_format_size(h.get('total_size', 0))}",
-        f"Agent       : {h.get('agent_name', '-') or '-'}",
-        f"Tool        : {h.get('tool_name', '-') or '-'}",
-        f"Version     : {h.get('version_label', '-') or '-'}",
-        f"Tags        : {', '.join(h.get('tags', []) or ['-'])}",
-        f"Created     : {h.get('created_at', 'unknown')}",
-        f"Source path : {h.get('source_path', '-')}",
+        f"ID              : {h.get('id', 'unknown')}",
+        f"Name            : {h.get('name', '')}",
+        f"Description     : {h.get('description', '')}",
+        f"Workspace       : {h.get('workspace_id', '')}",
+        f"Status          : [{status_color}]{status}[/{status_color}]",
+        f"Provider        : {h.get('provider_id', '-') or '-'}",
+        f"Files (uploaded): {h.get('file_count', 0)}",
+        f"Total size      : {_format_size(h.get('total_uploaded_size', h.get('total_size', 0)))}",
+        f"Manifest        : {'yes' if h.get('manifest_file_id') else 'no'} (file_id: {h.get('manifest_file_id', 'N/A')[:16] if h.get('manifest_file_id') else 'N/A'})",
+        f"Agent           : {h.get('agent_name', '-') or '-'}",
+        f"Tool            : {h.get('tool_name', '-') or '-'}",
+        f"Version         : {h.get('version_label', '-') or '-'}",
+        f"Tags            : {', '.join(h.get('tags', []) or ['-'])}",
+        f"Created         : {h.get('created_at', 'unknown')}",
+        f"Source path     : {h.get('source_path', '-')}",
     ]
 
     if h.get("git_branch"):
-        lines.append(f"Git branch  : {h.get('git_branch')}")
-        lines.append(f"Git commit  : {h.get('git_commit', '')[:12]}")
+        lines.append(f"Git branch      : {h.get('git_branch')}")
+        lines.append(f"Git commit      : {h.get('git_commit', '')[:12]}")
+
+    if h.get("failed_files"):
+        lines.append(f"Failed files    : {len(h['failed_files'])}")
+        for fp in h["failed_files"][:5]:
+            lines.append(f"  - {fp}")
+        if len(h["failed_files"]) > 5:
+            lines.append(f"  ... and {len(h['failed_files']) - 5} more")
 
     console.print(Panel.fit("\n".join(lines), title=f"Handoff: {handoff_id[:16]}", border_style="green"))
 
-    # Show files if available
-    files = h.get("files", [])
+    # Show files if available in manifest
+    manifest = h.get("manifest", {})
+    files = manifest.get("files", []) if manifest else []
     if files:
         console.print()
-        table = Table(box=None, border_style="dim", title="Files")
+        table = Table(box=None, border_style="dim", title="Files (with upload status)")
         table.add_column("Path", style="white")
-        table.add_column("Size", justify="right", width=12)
+        table.add_column("Size", justify="right", width=10)
+        table.add_column("Status", width=12)
+        table.add_column("File ID", style="dim", width=18)
         table.add_column("Checksum", style="dim", width=16)
         for f in files[:50]:
-            table.add_row(f.get("relative_path", ""), _format_size(f.get("size", 0)), f.get("checksum", "")[:12])
+            upload_status = f.get("upload_status", "unknown")
+            status_style = {
+                "uploaded": "green",
+                "failed": "red",
+                "pending": "yellow",
+            }.get(upload_status, "dim")
+            table.add_row(
+                f.get("relative_path", ""),
+                _format_size(f.get("size", 0)),
+                f"[{status_style}]{upload_status}[/{status_style}]",
+                f.get("file_id", "-")[:18] if f.get("file_id") else "-",
+                f.get("checksum", "")[:12],
+            )
         console.print(table)
         if len(files) > 50:
             console.print(f"[dim]... and {len(files) - 50} more files[/]")
