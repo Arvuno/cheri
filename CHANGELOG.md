@@ -5,6 +5,41 @@ All notable changes to Cheri will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0rc1] - 2026-05-30 - Release Candidate
+
+### Release Status
+**v1.0.0 RC1** — Release candidate for v1.0. Public beta matured into RC.
+
+### Public Beta Matured Into RC
+- Python tests pass: 149/149
+- Worker tests pass: 8/8
+- Storage tests pass: 14/14
+- Ruff pass
+- Mypy 0 errors (26 pre-existing non-blocking type errors)
+- Provider capabilities truthfully corrected
+- S3-compatible beta verified through Worker-proxy + MinIO
+- Agent handoff push/pull implemented
+- Secret-safe scanning default
+
+### Known Limitations
+- Upload-only sync (no bidirectional sync)
+- No conflict resolution
+- Direct-to-S3 CLI mode not implemented (all transfers go through worker proxy)
+- Multipart upload not implemented
+- Backblaze B2: docs-only/planned
+- Google Drive: not implemented
+- PyPI publish requires owner approval
+
+### Changed
+- S3-compatible provider status upgraded from "Experimental" to "Beta (MinIO verified)"
+- MinIO infrastructure verified via Worker-proxy flow
+- `KeyringCredentialStore` — added `KeyringBackend` Protocol for type-safe keyring access
+
+### Fixed
+- `HandoffManifest.to_dict()` mypy fix
+- `workspace/service.py` TaskDefinition attribute access fix
+- `CheriHelpMixin` stub methods for click compatibility
+
 ## [0.9.1] - 2026-05-30 - Final Hardening Before v1.0 RC
 
 ### Added

@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="cheri",
-    version="0.9.1",
+    version="1.0.0rc1",
     description="CLI-first collaborative workspace sync for developer teams.",
     long_description=long_description,
     long_description_content_type="text/markdown",

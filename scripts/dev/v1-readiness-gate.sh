@@ -28,42 +28,38 @@ FAIL_COUNT=0
 
 run_check() {
     local name="$1"
-    local command="$2"
-    local expected_exit="${3:-0}"
-
+    local expected_exit="$2"
+    shift 2
     echo -n "Checking: $name ... "
     set +e
-    output=$($command 2>&1)
+    output=$("$@" 2>&1)
     actual_exit=$?
     set -e
-
     if [ $actual_exit -eq $expected_exit ]; then
         echo -e "${GREEN}PASS${NC}"
         PASS_COUNT=$((PASS_COUNT + 1))
-        return 0
     else
         echo -e "${RED}FAIL${NC} (exit code: $actual_exit)"
         echo "$output" | head -20
         FAIL_COUNT=$((FAIL_COUNT + 1))
-        return 1
     fi
 }
 
 echo "--- Python Tests ---"
-run_check "Python unit tests" "python -m unittest discover -s tests/python -p 'test_*.py'" 0
+run_check "Python unit tests" 0 python -m unittest discover -s tests/python -p test_*.py
 
 echo ""
 echo "--- Node.js Tests ---"
-run_check "Worker Node tests" "node tests/node/worker.test.mjs" 0
-run_check "Storage Node tests" "node tests/node/storage.test.mjs" 0
+run_check "Worker Node tests" 0 node tests/node/worker.test.mjs
+run_check "Storage Node tests" 0 node tests/node/storage.test.mjs
 
 echo ""
 echo "--- npm Tests ---"
-run_check "npm test" "npm test" 0
+run_check "npm test" 0 npm test
 
 echo ""
 echo "--- Linting ---"
-run_check "ruff check" "ruff check ." 0
+run_check "ruff check" 0 ruff check .
 
 echo ""
 echo "--- Type Checking ---"
@@ -85,16 +81,16 @@ fi
 
 echo ""
 echo "--- CLI Version ---"
-run_check "cheri CLI version" "python -m cheri_cloud_cli.cli --help" 0
+run_check "cheri CLI --help" 0 python -m cheri_cloud_cli.cli --help
 
 echo ""
 echo "--- Package Build ---"
-run_check "python setup.py --version" "python setup.py --version" 0
-run_check "python build" "python -m build" 0
+run_check "python setup.py --version" 0 python setup.py --version
+run_check "python build" 0 python -m build
 
 echo ""
 echo "--- Package Distribution Check ---"
-run_check "twine check dist/*" "twine check dist/*" 0
+run_check "twine check dist/*" 0 twine check dist/*
 
 echo ""
 echo "=========================================="
