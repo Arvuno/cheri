@@ -5,6 +5,30 @@ All notable changes to Cheri will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0-s3-e2e-and-type-cleanup] - 2026-05-30 - S3-Compatible Provider MinIO Verification
+
+### Added
+- `scripts/dev/minio-e2e.py` — Python MinIO e2e test harness using `minio` SDK. Tests bucket creation, upload/download with SHA256 checksum verification, presigned PUT/GET URL generation, list, stat, and delete. 8/8 tests pass.
+- `scripts/dev/minio-e2e.sh` — Shell wrapper with Docker container lifecycle management for `minio-e2e.py`
+- `.gitignore` additions: `*.key`, `*.pem`, `*.env`, `id_rsa*`, `id_ed25519*`, `.npmrc`, `.pypirc`, `.netrc`, `.dev.vars`
+
+### Changed
+- S3-compatible provider status in `PROVIDER_MATRIX.md` upgraded from "Experimental" to "Beta (MinIO verified)"
+- MinIO infrastructure verified: path-style addressing, direct PUT/GET via SDK, presigned URL generation all working
+- `KeyringCredentialStore` — added `KeyringBackend` Protocol for type-safe keyring access; added null guards for `_keyring` member
+
+### Fixed
+- `HandoffManifest.to_dict()` — `d` dict now annotated as `dict[str, object]` to fix list-assignment mypy errors
+- `workspace/service.py` — `_get_active_tasks` fixed to use `TaskDefinition` attribute access (`.workspace_id`, `.status`) instead of `.get()` dict protocol
+- `workspace/service.py` — `recent_items` typed as `list[Any]` to fix type narrowing issues
+- `CheriHelpMixin` (cli_framework.py) — added stub `format_usage`, `format_epilog`, `get_params` with `type: ignore[arg-type]` for click inheritance compatibility
+
+### Known Limitations
+- Mypy: 26 errors remain (down from 49). Target of <20 not met. Errors are pre-existing, not regressions.
+- Backblaze B2: no implementation class — docs-only, marked "experimental / not ready"
+- Direct-to-S3 (CLI using presigned URL directly): not implemented — all transfers go through worker proxy
+- Multipart upload: declared in capabilities but not implemented in S3-compatible provider
+
 ## [0.6.0-reliability] - 2026-05-30 - Reliability Hardening for Public Beta
 
 ### Added
