@@ -114,6 +114,25 @@ class CheriClient:
             active_workspace_id=payload.get("active_workspace_id"),
         )
 
+
+    def get_storage_config(self, state: AuthState, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+        return self._request('get', '/v1/storage/config', state=state, workspace_id=workspace_id)
+
+    def configure_storage(
+        self,
+        state: AuthState,
+        provider: Dict[str, Any] | ProviderConfig,
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._request(
+            'post',
+            '/v1/storage/configure',
+            state=state,
+            workspace_id=workspace_id,
+            json={'provider': self._provider_payload(provider)},
+        )
+
     def list_files(self, state: AuthState, workspace_id: Optional[str] = None) -> List[RemoteFile]:
         payload = self._request("get", "/v1/files", state=state, workspace_id=workspace_id)
         return [RemoteFile.from_payload(item) for item in payload.get("files", [])]
@@ -241,6 +260,52 @@ class CheriClient:
                 **metadata,
             },
         )
+
+    def list_handoffs(self, state: AuthState, workspace_id: str) -> List[Dict[str, Any]]:
+        payload = self._request("get", "/v1/handoffs", state=state, workspace_id=workspace_id)
+        return list(payload.get("handoffs", []))
+
+    def get_handoff(self, state: AuthState, handoff_id: str) -> Dict[str, Any]:
+        return self._request("get", f"/v1/handoffs/{handoff_id}", state=state)
+
+    def get_latest_handoff(self, state: AuthState, workspace_id: str) -> Dict[str, Any]:
+        return self._request("get", "/v1/handoffs/latest", state=state, workspace_id=workspace_id)
+
+    def create_handoff(self, state: AuthState, workspace_id: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
+        payload = self._request(
+            "post",
+            "/v1/handoffs",
+            state=state,
+            workspace_id=workspace_id,
+            json={
+                "handoff_id": manifest.get("handoff_id"),
+                "name": manifest.get("name"),
+                "description": manifest.get("description"),
+                "tags": manifest.get("tags", []),
+                "source_path": manifest.get("source_path"),
+                "file_count": manifest.get("_file_count", 0),
+                "total_size": manifest.get("_total_size", 0),
+                "manifest_path": "cheri-handoff.json",
+                "manifest_checksum": manifest.get("manifest_checksum", ""),
+                "agent_name": manifest.get("agent_name"),
+                "tool_name": manifest.get("tool_name"),
+                "version_label": manifest.get("version_label"),
+                "git_branch": manifest.get("git_context", {}).get("branch"),
+                "git_commit": manifest.get("git_context", {}).get("commit_hash"),
+                "notes": manifest.get("notes", ""),
+            },
+        )
+        return dict(payload.get("handoff", {}))
+
+    def update_handoff(self, state: AuthState, handoff_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update handoff metadata (status, file_ids, etc.)."""
+        payload = self._request(
+            "patch",
+            f"/v1/handoffs/{handoff_id}",
+            state=state,
+            json=updates,
+        )
+        return dict(payload.get("handoff", {}))
 
     def _request(
         self,
