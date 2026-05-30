@@ -315,7 +315,7 @@ def _check_task_registry() -> CheckResult:
                 message="No tasks configured",
             )
 
-        running = sum(1 for t in tasks if t.get("status") == "running")
+        running = sum(1 for t in tasks if t.status == "running")
         return CheckResult(
             name="Task Registry",
             status="pass",

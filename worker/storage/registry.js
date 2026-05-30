@@ -101,11 +101,11 @@ export function getProviderCapabilities(kind) {
     download: true,
     delete: true,
     list: kind === "system",
-    signedUploadUrl: kind === "s3-compatible",
-    signedDownloadUrl: kind === "s3-compatible",
-    multipart: kind === "s3-compatible",
-    checksum: false,
-    serverSideCopy: false,
+    signedUploadUrl: kind === "s3-compatible" ? "internal" : false,
+    signedDownloadUrl: kind === "s3-compatible" ? "internal" : false,
+    multipart: false, // Not implemented for any provider
+    checksum: kind === "s3-compatible", // Verified via SHA256 in MinIO e2e
+    serverSideCopy: false, // Not implemented
   };
 }
 

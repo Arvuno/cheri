@@ -134,16 +134,21 @@ export const CAPABILITIES_SYSTEM = {
   serverSideCopy: false,
 };
 
+// S3-compatible capabilities
+// NOTE: signedUploadUrl/signedDownloadUrl are generated internally by the provider
+// but CLI does NOT use direct-to-S3 presigned URL mode — all transfers go through worker proxy.
+// multipart upload is NOT implemented.
+// serverSideCopy is NOT implemented.
 export const CAPABILITIES_S3_COMPATIBLE = {
   upload: true,
   download: true,
   delete: true,
   list: true,
-  signedUploadUrl: true,
-  signedDownloadUrl: true,
-  multipart: true,
-  checksum: true,
-  serverSideCopy: true,
+  signedUploadUrl: "internal", // CLI uses worker-proxy; presigned URLs exist internally
+  signedDownloadUrl: "internal", // CLI uses worker-proxy; presigned URLs exist internally
+  multipart: false, // Not implemented
+  checksum: true, // Verified via SHA256 in MinIO e2e
+  serverSideCopy: false, // Not implemented
 };
 
 // Validation state helpers

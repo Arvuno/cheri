@@ -5,7 +5,7 @@ All notable changes to Cheri will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0-s3-e2e-and-type-cleanup] - 2026-05-30 - S3-Compatible Provider MinIO Verification
+## [0.9.1] - 2026-05-30 - Final Hardening Before v1.0 RC
 
 ### Added
 - `scripts/dev/minio-e2e.py` — Python MinIO e2e test harness using `minio` SDK. Tests bucket creation, upload/download with SHA256 checksum verification, presigned PUT/GET URL generation, list, stat, and delete. 8/8 tests pass.

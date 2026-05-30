@@ -233,7 +233,7 @@ def workspace_status(console: Console, client: CheriClient, store: JsonCredentia
                 {"code": "system-reset", "message": "System provider data resets daily."} if storage_info.get("kind") == "system" else None,
             ],
         }
-        output["warnings"] = [w for w in output["warnings"] if w is not None]
+        output["warnings"] = [w for w in output["warnings"] if w is not None]  # type: ignore[assignment,union-attr]
         console.print(json.dumps(output, indent=2))
         return
 

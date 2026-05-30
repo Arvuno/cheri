@@ -25,9 +25,9 @@
 | List (listObjects) | ✅ | ✅ | ✅ |
 | Head (headObject) | ✅ | ✅ | ✅ |
 | Copy (copyObject) | ✅ | ✅ | ❌ |
-| Signed upload URL | ❌ | ✅ | ❌ |
-| Signed download URL | ❌ | ✅ | ❌ |
-| Multipart upload | ❌ | ✅ | ❌ |
+| Signed upload URL | ❌ | ⚠️ internal | ❌ |
+| Signed download URL | ❌ | ⚠️ internal | ❌ |
+| Multipart upload | ❌ | ❌ | ❌ |
 | Checksum verification | ❌ | ✅ | ❌ |
 
 ---
@@ -63,11 +63,12 @@ They live in workspace storage configuration under `workspace.storage.provider.s
 
 ## S3-Compatible Provider
 
-- **Status:** experimental
+- **Status:** experimental (beta verified with MinIO)
 - **Validation:** Checks endpoint, bucket, and credentials by performing a list operation
-- **Capabilities:** Full S3 CRUD + presigned URLs + multipart
+- **Capabilities:** Full S3 CRUD + presigned URLs (internal/worker-proxy only, not CLI direct mode) + checksum verification
 - **Requires:** `endpoint`, `bucket`, `region`, `access_key_id`, `secret_access_key`
 - **MinIO support:** Set `force_path_style: true` for MinIO endpoint compatibility
+- **Not implemented:** Multipart upload, server-side copy, CLI direct-to-S3 presigned URL mode
 
 ---
 

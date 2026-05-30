@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple, cast
 
 import click
 from rich import box
@@ -155,7 +155,7 @@ def _option_from_payload(payload: Dict[str, object]) -> ProviderOption:
         supports_incremental_sync=bool(payload.get("supports_incremental_sync", False)),
         fields=tuple(
             ProviderFieldSpec.from_payload(field)
-            for field in payload.get("credential_fields", [])
+            for field in cast(Iterable[object], payload.get("credential_fields") or [])
             if isinstance(field, dict)
         ),
     )

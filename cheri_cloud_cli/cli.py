@@ -136,9 +136,9 @@ def _resolve_help_context(root_command: click.Command, command_path: tuple[str, 
     current_command = root_command
     current_context = click.Context(root_command, info_name="cheri")
     for segment in command_path:
-        if not isinstance(current_command, click.MultiCommand):
+        if not isinstance(current_command, click.MultiCommand):  # type: ignore[arg-type]
             raise click.ClickException(f"`{current_context.command_path}` does not accept subcommands.")
-        next_command = current_command.get_command(current_context, segment)
+        next_command = current_command.get_command(current_context, segment)  # type: ignore[attr-defined]
         if next_command is None:
             if isinstance(current_command, CheriGroup):
                 suggestion = current_command._build_unknown_command_message(current_context, segment)

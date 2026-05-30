@@ -509,7 +509,9 @@ def run_init(
     _offer_task_creation(console, client, store, non_interactive, skip_task)
 
     # Final success screen
-    _success_screen(console, username, ws_name or (store.load().active_workspace.name if store.load() else None))
+    auth_state = store.load()
+    ws_name_from_store = auth_state.active_workspace.name if auth_state and auth_state.active_workspace else None
+    _success_screen(console, username, ws_name or ws_name_from_store)
 
 
 def init(

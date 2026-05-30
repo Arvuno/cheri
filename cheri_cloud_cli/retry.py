@@ -152,7 +152,7 @@ def retry_onTransient_error(
                 max_retries=max_retries,
                 initial_delay=initial_delay,
                 max_delay=max_delay,
-                **kwargs,
+                **kwargs,  # type: ignore[arg-type]
             )
 
         return wrapper

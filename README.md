@@ -6,7 +6,7 @@
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white&style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Public%20Beta-orange?style=flat-square)
-![Version](https://img.shields.io/badge/Version-0.8.0b1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-0.9.1-blue?style=flat-square)
 
 **CLI-first collaborative workspace sync tool**
 

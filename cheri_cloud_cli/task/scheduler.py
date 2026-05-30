@@ -39,8 +39,8 @@ def parse_every(value: str) -> Tuple[int, str]:
     raw = str(value or "").strip().lower()
     if not raw:
         raise click.ClickException("An interval value is required for interval or hybrid task modes.")
-    digits = []
-    suffix = []
+    digits: list[str] = []
+    suffix: list[str] = []
     for char in raw:
         if char.isdigit() and not suffix:
             digits.append(char)

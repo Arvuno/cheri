@@ -1,6 +1,6 @@
 """Cheri - CLI-first collaborative workspace sync for developer teams."""
 
-__version__ = "0.8.0b1"
+__version__ = "0.9.1"
 
 from .cli import main
 

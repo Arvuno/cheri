@@ -16,7 +16,7 @@ from rich.panel import Panel
 
 from ..client import CheriClient
 from ..sessions import JsonCredentialStore, load_authenticated_state
-from ..task.models import TaskDefinition, iso_now
+from ..task.models import TaskDefinition, TaskRuntimeState, iso_now
 from ..task.registry import TaskRegistry
 from ..task.runtime import prime_runtime_state, scan_task
 from ..task.scheduler import interval_due, next_interval_timestamp
@@ -184,7 +184,7 @@ class WatchService:
             return [task for task in tasks if task.enabled]
         return [task for task in tasks if task.enabled]
 
-    def _prepare_runtime(self, task: TaskDefinition, runtime) -> object:
+    def _prepare_runtime(self, task: TaskDefinition, runtime: TaskRuntimeState) -> TaskRuntimeState:
         changed = False
         if task.sync_mode in {"on-change", "instant", "hybrid"} and not runtime.snapshot:
             prime_runtime_state(task, runtime)
@@ -305,7 +305,7 @@ class WatchService:
         else:
             popen_kwargs["start_new_session"] = True
         try:
-            return subprocess.Popen(command, **popen_kwargs)
+            return subprocess.Popen(command, **popen_kwargs)  # type: ignore[call-overload]
         finally:
             log_handle.close()
 

@@ -214,9 +214,8 @@ def push_handoff(
             "[yellow]Warning:[/] Secret-safe scanning is enabled. "
             "Sensitive files will be skipped.\n"
             "Use --include-sensitive to include them.\n\n"
-            "Continue with handoff?",
-            default="y",
-        )
+            "Continue with handoff? [Y/n]: "
+        ) or "y"
         if confirmed.lower() not in ("y", "yes"):
             console.print("[yellow]Cancelled.[/]")
             return 0
@@ -596,7 +595,7 @@ def pull_handoff(
 
     output_dir = Path(dest or f"./handoff-{handoff_id[:8]}").resolve()
     if output_dir.exists() and any(output_dir.iterdir()):
-        if not console.input(f"[yellow]Directory {output_dir} exists and is not empty. Continue?[/]", default="n"):
+        if not console.input(f"[yellow]Directory {output_dir} exists and is not empty. Continue? [y/N]: "):
             console.print("[yellow]Cancelled.[/]")
             return 0
 
@@ -790,9 +789,8 @@ def archive_handoff(console: Console, client: CheriClient, store: JsonCredential
     confirmed = console.input(
         f"[yellow]Archive handoff '{h.get('name', handoff_id[:16])}'?[/]\n"
         "This is a non-destructive operation. The handoff will be marked as archived.\n"
-        "Continue?",
-        default="n",
-    )
+        "Continue? [y/N]: "
+    ) or "n"
     if confirmed.lower() not in ("y", "yes"):
         console.print("[yellow]Cancelled.[/]")
         return
@@ -830,9 +828,8 @@ def delete_handoff(console: Console, client: CheriClient, store: JsonCredentialS
     confirmed = console.input(
         f"[red]This will PERMANENTLY delete handoff '{h.get('name', handoff_id[:16])}'.[/]\n"
         "This operation cannot be undone. All associated file content will be removed.\n"
-        "Type 'yes' to confirm: ",
-        default="no",
-    )
+        "Type 'yes' to confirm: "
+    ) or "no"
     if confirmed.lower() != "yes":
         console.print("[yellow]Cancelled.[/]")
         return
@@ -965,9 +962,8 @@ def bundle_handoff(console: Console, path: str, name: str, include_sensitive: bo
 
     if not include_sensitive:
         confirmed = console.input(
-            "[yellow]Warning:[/] Secret-safe scanning is enabled. Continue?",
-            default="y",
-        )
+            "[yellow]Warning:[/] Secret-safe scanning is enabled. Continue? [Y/n]: "
+        ) or "y"
         if confirmed.lower() not in ("y", "yes"):
             console.print("[yellow]Cancelled.[/]")
             return

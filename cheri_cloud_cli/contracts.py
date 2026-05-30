@@ -10,6 +10,14 @@ def _compact_dict(values: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
+def _str(payload: Dict[str, Any], key: str, fallback: str = "") -> str:
+    """Safely extract a string from a payload dict."""
+    val = payload.get(key)
+    if val is None:
+        return fallback
+    return str(val)
+
+
 @dataclass
 class ProviderFieldSpec:
     key: str
@@ -233,9 +241,9 @@ class SessionContext:
         if not isinstance(payload, dict):
             payload = {}
         return cls(
-            token=payload.get("token") or payload.get("session_token") or fallback_token,
-            issued_at=payload.get("issued_at") or fallback_issued_at,
-            session_id=payload.get("id", payload.get("session_id", "")),
+            token=_str(payload, "token") or _str(payload, "session_token") or fallback_token,
+            issued_at=_str(payload, "issued_at") or fallback_issued_at,
+            session_id=_str(payload, "id") or _str(payload, "session_id", ""),
         )
 
 
@@ -417,9 +425,9 @@ class ProviderObjectRef:
         if not isinstance(payload, dict):
             payload = {}
         return cls(
-            kind=payload.get("kind", ""),
-            object_key=payload.get("object_key", payload.get("provider_object_key", "")),
-            object_id=payload.get("object_id", payload.get("provider_object_id", "")),
+            kind=_str(payload, "kind"),
+            object_key=_str(payload, "object_key") or _str(payload, "provider_object_key"),
+            object_id=_str(payload, "object_id") or _str(payload, "provider_object_id"),
         )
 
 

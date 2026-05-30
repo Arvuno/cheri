@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import click
 from rich.console import Console
@@ -14,6 +14,20 @@ from .sessions import JsonCredentialStore, load_authenticated_state
 
 
 console = Console()
+
+
+def _ws_get(ws: object, key: str, default: Any = None) -> Any:
+    """Get a workspace attribute by key, handling dict or dataclass."""
+    if isinstance(ws, dict):
+        return ws.get(key, default)
+    return getattr(ws, key, default)
+
+
+def _provider_get(provider: object, key: str, default: Any = None) -> Any:
+    """Get a provider attribute by key, handling dict or dataclass."""
+    if isinstance(provider, dict):
+        return provider.get(key, default)
+    return getattr(provider, key, default)
 
 
 def list_storage_providers(client: CheriClient, include_experimental: bool = False) -> None:
@@ -110,34 +124,34 @@ def show_storage_status(client: CheriClient, store: JsonCredentialStore, workspa
             console.print("[yellow]No active workspace. Use --workspace to specify one.[/]")
             return
 
-    storage = target_workspace.get("storage", {})
-    provider = storage.get("provider", {}) if isinstance(storage, dict) else {}
+    storage = _ws_get(target_workspace, "storage", {})
+    provider = _ws_get(storage, "provider", {}) if isinstance(storage, dict) else {}
 
     if not provider:
         console.print("[yellow]No storage provider configured for this workspace.[/]")
         return
 
-    kind = provider.get("kind", "unknown")
-    label = provider.get("label", kind)
-    validation = provider.get("validation", {})
-    state = validation.get("state", "unknown") if isinstance(validation, dict) else "unknown"
-    available = validation.get("available", False) if isinstance(validation, dict) else False
-    reset_policy = provider.get("reset_policy", "")
+    kind = _provider_get(provider, "kind", "unknown")
+    label = _provider_get(provider, "label", kind)
+    validation = _provider_get(provider, "validation", {})
+    validation_state = _provider_get(validation, "state", "unknown") if isinstance(validation, dict) else "unknown"
+    available = _provider_get(validation, "available", False) if isinstance(validation, dict) else False
+    reset_policy = _provider_get(provider, "reset_policy", "")
 
     from rich.panel import Panel
 
     status_lines = [
-        f"Workspace   : {target_workspace.get('name', 'unknown')} ({target_workspace.get('id', '')})",
+        f"Workspace   : {_ws_get(target_workspace, 'name', 'unknown')} ({_ws_get(target_workspace, 'id', '')})",
         f"Provider    : {label}",
         f"Kind        : {kind}",
-        f"State       : {state}",
+        f"State       : {validation_state}",
         f"Available   : {'Yes' if available else 'No'}",
     ]
 
     if reset_policy:
         status_lines.append(f"Reset policy : {reset_policy}")
 
-    warnings = validation.get("warnings", []) if isinstance(validation, dict) else []
+    warnings = _provider_get(validation, "warnings", []) if isinstance(validation, dict) else []
     if warnings:
         status_lines.append("")
         status_lines.append("Warnings:")
