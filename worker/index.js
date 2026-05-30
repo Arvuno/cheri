@@ -1,6 +1,7 @@
 import { appendTaskActivity, buildActivityFeed } from "./activity/service.js";
 import { loginUser, logoutUser, registerUser } from "./auth/service.js";
 import { completeUpload, consumeDownload, consumeUpload, createDownloadGrant, createUploadGrant, cleanupExpiredSystemFiles, listWorkspaceFiles } from "./files/service.js";
+import { createHandoff, getHandoff, listWorkspaceHandoffs, getLatestHandoff, updateHandoff } from "./handoff/service.js";
 import { errorResponse, json, optionsResponse, parseJson } from "./lib/http.js";
 import { requireUserSession, requireWorkspaceAccess } from "./lib/storage.js";
 import { providerCatalog, redactProvider, validateProviderSelection } from "./providers/index.js";
@@ -58,6 +59,7 @@ function apiManifest(env) {
       activity: ["/v1/activity", "/v1/task-events"],
       tasks: ["/v1/tasks", "/v1/tasks/:id"],
       providers: ["/v1/providers", "/v1/providers/validate"],
+      handoffs: ["/v1/handoffs", "/v1/handoffs/:id", "/v1/handoffs/latest"],
     },
     deprecated_web_surface: [
       "/dashboard",
@@ -140,6 +142,43 @@ export default {
           allowExperimental: booleanFlag(body?.allow_experimental, false),
         });
         return json({ provider: redactProvider(provider) }, 200, request, env);
+      }
+
+      // GET /v1/storage/config — retrieve current workspace storage configuration
+      if (path === "/v1/storage/config" && request.method === "GET") {
+        const access = await requireWorkspaceAccess(request, env);
+        const providerConfig = access.workspace?.storage?.provider || null;
+        return json({
+          workspace_id: access.workspace.id,
+          workspace_name: access.workspace.name,
+          provider: providerConfig ? redactProvider(providerConfig) : null,
+        }, 200, request, env);
+      }
+
+      // POST /v1/storage/configure — update workspace storage provider
+      if (path === "/v1/storage/configure" && request.method === "POST") {
+        const access = await requireWorkspaceAccess(request, env, { admin: true });
+        const body = await parseJson(request);
+        const newProviderSelection = body?.provider;
+        if (!newProviderSelection) {
+          return json({ error: "provider is required." }, 400, request, env);
+        }
+        // Validate first — do not save if validation fails.
+        const validatedProvider = await validateProviderSelection(env, newProviderSelection, {
+          allowExperimental: booleanFlag(newProviderSelection?.allow_experimental, false),
+        });
+        // Import createWorkspaceStorageState here to rebuild storage state.
+        const { createWorkspaceStorageState } = await import("./services/provider_config.js");
+        const newStorageState = await createWorkspaceStorageState(env, access.workspace.id, validatedProvider);
+        access.workspace.storage = newStorageState;
+        access.workspace.updated_at = new Date().toISOString();
+        const { saveWorkspace } = await import("./lib/storage.js");
+        await saveWorkspace(env, access.workspace);
+        return json({
+          ok: true,
+          workspace_id: access.workspace.id,
+          provider: redactProvider(validatedProvider),
+        }, 200, request, env);
       }
 
       if (path === "/v1/auth/register" && request.method === "POST") {
@@ -260,6 +299,52 @@ export default {
         const access = await requireWorkspaceAccess(request, env);
         await appendTaskActivity(env, access.workspace.id, access.user.username, await parseJson(request));
         return json({ ok: true }, 200, request, env);
+      }
+
+      // GET /v1/handoffs — list workspace handoffs
+      if (path === "/v1/handoffs" && request.method === "GET") {
+        const access = await requireWorkspaceAccess(request, env);
+        return json({ handoffs: await listWorkspaceHandoffs(env, access.workspace.id) }, 200, request, env);
+      }
+
+      // POST /v1/handoffs — create handoff metadata
+      if (path === "/v1/handoffs" && request.method === "POST") {
+        await enforceRateLimit(request, env, "handoff-create", { limit: 30, windowSeconds: 10 * 60 });
+        const access = await requireWorkspaceAccess(request, env);
+        const body = await parseJson(request);
+        return json({ handoff: await createHandoff(env, access.workspace, access.user, body) }, 201, request, env);
+      }
+
+      // GET /v1/handoffs/latest — get most recent handoff for workspace
+      if (path === "/v1/handoffs/latest" && request.method === "GET") {
+        const access = await requireWorkspaceAccess(request, env);
+        return json({ handoff: await getLatestHandoff(env, access.workspace.id) }, 200, request, env);
+      }
+
+      // GET /v1/handoffs/:id — get handoff by ID
+      if (path.match(/^\/v1\/handoffs\/[^/]+$/) && request.method === "GET") {
+        const access = await requireWorkspaceAccess(request, env);
+        const handoffId = path.split("/")[3];
+        return json({ handoff: await getHandoff(env, access.workspace, handoffId) }, 200, request, env);
+      }
+
+      // PATCH /v1/handoffs/:id — update handoff metadata (status, file_ids, etc.)
+      if (path.match(/^\/v1\/handoffs\/[^/]+$/) && request.method === "PATCH") {
+        const access = await requireWorkspaceAccess(request, env);
+        const handoffId = path.split("/")[3];
+        const body = await parseJson(request);
+        const allowedFields = [
+          "status", "file_count", "total_uploaded_size", "uploaded_file_ids",
+          "manifest_file_id", "manifest_checksum", "failed_files", "provider_id",
+        ];
+        const updates = {};
+        for (const field of allowedFields) {
+          if (body[field] !== undefined) {
+            updates[field] = body[field];
+          }
+        }
+        const updated = await updateHandoff(env, access.workspace, access.user, handoffId, updates);
+        return json({ handoff: updated }, 200, request, env);
       }
 
       return json({ error: `Unknown route: ${request.method} ${path}` }, 404, request, env);
