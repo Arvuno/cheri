@@ -8,7 +8,7 @@
 | Provider | Status | Selectable | Transfer | Notes |
 |---|---|---|---|---|
 | `System (recommended)` | Ready | Yes | Working | Uses Cloudflare R2 via HERMES_BUCKET. Temporary — files reset daily. |
-| `S3-compatible` | Experimental | Behind flag | Beta | Full S3 CRUD + presigned URLs. Requires CHERI_EXPERIMENTAL_PROVIDERS=1. |
+| `S3-compatible` | Beta (MinIO verified) | Behind flag | Beta | Full S3 CRUD + presigned URLs. MinIO e2e: 8/8 PASS. Requires CHERI_EXPERIMENTAL_PROVIDERS=1. |
 | `Local Dev` | Experimental | No | Test-only | In-memory Map, not persisted. Worker tests only. |
 | `Google Drive` | Not Ready | No | Not active | Scaffolded. Coming soon. |
 | `Backblaze B2` | Not Ready | No | Not active | Scaffolded. S3-compatible API possible. |

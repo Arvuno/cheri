@@ -20,6 +20,9 @@ def _help_records(ctx: click.Context, params: Sequence[click.Parameter]) -> list
 
 
 class CheriHelpMixin:
+    help: str | None
+    examples: list[str]
+
     def __init__(self, *args, examples: Iterable[str] | None = None, **kwargs) -> None:
         self.examples = list(examples or [])
         super().__init__(*args, **kwargs)
@@ -38,6 +41,15 @@ class CheriHelpMixin:
         if records:
             with formatter.section("Options"):
                 formatter.write_dl(records)
+
+    def format_usage(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        click.Group.format_usage(self, ctx, formatter)  # type: ignore[arg-type]
+
+    def format_epilog(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        click.Group.format_epilog(self, ctx, formatter)  # type: ignore[arg-type]
+
+    def get_params(self, ctx: click.Context) -> list[click.Parameter]:
+        return click.Command.get_params(self, ctx)  # type: ignore[arg-type]
 
     def _format_examples(self, formatter: click.HelpFormatter) -> None:
         if not self.examples:

@@ -9,12 +9,20 @@ import sys
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
 
 from ..config import get_legacy_config_dir, get_paths
 from ..contracts import AuthState
 
 _KEYRING_SERVICE_NAME = "cheri"
+
+
+class KeyringBackend(Protocol):
+    """Minimal protocol for keyring backend objects."""
+
+    def get_password(self, service: str, username: str) -> str | None: ...
+    def set_password(self, service: str, username: str, password: str) -> None: ...
+    def delete_password(self, service: str, username: str) -> None: ...
 
 
 class CredentialStore(ABC):
@@ -143,7 +151,7 @@ class JsonCredentialStore(CredentialStore):
                 path.unlink()
 
 
-def _get_keyring() -> Optional[object]:
+def _get_keyring() -> KeyringBackend | None:
     try:
         import keyring
 
@@ -180,7 +188,7 @@ class KeyringCredentialStore(CredentialStore):
 
     def __init__(self) -> None:
         self.paths = get_paths()
-        self._keyring = _get_keyring()
+        self._keyring: KeyringBackend | None = _get_keyring()
         self._use_keyring = self._keyring is not None and not _is_headless()
         self._fallback_warned = False
 
@@ -221,7 +229,7 @@ class KeyringCredentialStore(CredentialStore):
                 return None
             identity = payload.get("identity", {})
             workspace_access = payload.get("workspace_access", {})
-            if self._use_keyring:
+            if self._use_keyring and self._keyring is not None:
                 if session_token:
                     self._keyring.set_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY, session_token)
                 if bootstrap_secret:
@@ -260,7 +268,7 @@ class KeyringCredentialStore(CredentialStore):
             return None
         session_token = ""
         bootstrap_secret = ""
-        if self._use_keyring:
+        if self._use_keyring and self._keyring is not None:
             try:
                 session_token = str(self._keyring.get_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY) or "")
             except Exception:
@@ -282,10 +290,10 @@ class KeyringCredentialStore(CredentialStore):
     def save(self, state: AuthState, *, persist_bootstrap_secret: bool | None = None) -> None:
         existing = self.load()
         should_persist = (
-            bool(existing.bootstrap_secret if persist_bootstrap_secret is None else persist_bootstrap_secret)
+            bool(existing and existing.bootstrap_secret if persist_bootstrap_secret is None else persist_bootstrap_secret)
         )
         _write_json(self.paths.state_file, self._public_payload(state), private=False)
-        if self._use_keyring:
+        if self._use_keyring and self._keyring is not None:
             try:
                 self._keyring.set_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY, state.session_token)
             except Exception:
@@ -310,7 +318,7 @@ class KeyringCredentialStore(CredentialStore):
             _write_json(self.paths.secret_file, secret_payload, private=True)
 
     def clear(self) -> None:
-        if self._use_keyring:
+        if self._use_keyring and self._keyring is not None:
             try:
                 self._keyring.delete_password(_KEYRING_SERVICE_NAME, self._SESSION_KEY)
             except Exception:

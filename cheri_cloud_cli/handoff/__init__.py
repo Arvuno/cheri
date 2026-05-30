@@ -103,7 +103,7 @@ class HandoffManifest:
     created_by: Optional[str] = None
 
     def to_dict(self) -> dict:
-        d = {
+        d: dict[str, object] = {
             "schema_version": self.schema_version,
             "handoff_id": self.handoff_id,
             "name": self.name,

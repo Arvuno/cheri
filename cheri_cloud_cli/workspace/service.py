@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import click
 from rich import box
@@ -155,15 +155,15 @@ def _get_file_count(client: CheriClient, store: JsonCredentialStore, workspace_i
         return None
 
 
-def _get_active_tasks(workspace_id: str) -> List[Dict[str, Any]]:
+def _get_active_tasks(workspace_id: str) -> list[dict[str, Any]]:
     """Get active tasks for a workspace."""
     try:
         from ..task.registry import TaskRegistry
         registry = TaskRegistry()
         tasks = registry.list_tasks()
-        workspace_tasks = [t for t in tasks if t.get("workspace_id") == workspace_id]
-        running = [t for t in workspace_tasks if t.get("status") == "running"]
-        return running
+        workspace_tasks = [t for t in tasks if t.workspace_id == workspace_id]
+        running = [t for t in workspace_tasks if t.status == "running"]
+        return [task.to_dict() for task in running]
     except Exception:
         return []
 
@@ -201,11 +201,11 @@ def workspace_status(console: Console, client: CheriClient, store: JsonCredentia
     active_tasks = _get_active_tasks(workspace.id)
 
     # Gather recent activity
-    recent_items = []
+    recent_items: list[Any] = []
     try:
         activity = client.list_activity(auth_state, workspace.id)
         if activity and hasattr(activity, 'items'):
-            recent_items = activity.items[:5] if activity.items else []
+            recent_items = list(activity.items[:5]) if activity.items else []
     except CheriClientError:
         pass
 
