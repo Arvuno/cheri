@@ -1,6 +1,6 @@
 {
   "name": "cheri",
-  "version": "1.0.0rc1",
+  "version": "1.0.0",
   "description": "CLI-first collaborative workspace sync for developer teams — agent artifact handoff",
   "type": "module",
   "bin": {

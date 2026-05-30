@@ -5,8 +5,8 @@
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white&style=flat-square)
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white&style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Release%20Candidate-orange?style=flat-square)
-![Version](https://img.shields.io/badge/Version-1.0.0rc1-blue?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Stable%20v1.0-green?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)
 
 **CLI-first collaborative workspace sync tool**
 
@@ -34,7 +34,7 @@ Built on **Cloudflare Workers** (API) + **KV** (metadata) + **R2** (blob storage
 
 ## Current Status
 
-**v1.0.0 RC1** — Release candidate for v1.0. Public beta matured into RC.
+**v1.0.0 Stable** — First stable release. Release candidate matured into stable.
 
 | Ready | Limited |
 |-------|---------|

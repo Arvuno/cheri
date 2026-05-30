@@ -5,17 +5,17 @@ All notable changes to Cheri will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0rc1] - 2026-05-30 - Release Candidate
+## [1.0.0] - 2026-05-30
 
 ### Release Status
-**v1.0.0 RC1** — Release candidate for v1.0. Public beta matured into RC.
+**v1.0.0 Stable** — First stable release. Promoted from `1.0.0rc1`.
 
 ### Public Beta Matured Into RC
 - Python tests pass: 149/149
 - Worker tests pass: 8/8
 - Storage tests pass: 14/14
 - Ruff pass
-- Mypy 0 errors (26 pre-existing non-blocking type errors)
+- Mypy 0 errors
 - Provider capabilities truthfully corrected
 - S3-compatible beta verified through Worker-proxy + MinIO
 - Agent handoff push/pull implemented
